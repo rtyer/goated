@@ -56,7 +56,7 @@ goated/
 │
 ├── cmd/
 │   ├── daemon/main.go          # Daemon binary (builds ./goated_daemon)
-│   └── goated/                 # Shared CLI (builds both ./goated and workspace/goat)
+│   └── goated/                 # Shared CLI (builds both ./goated and ./goat)
 │       └── cli/
 │           ├── bootstrap.go    # Interactive setup wizard
 │           ├── creds.go        # Credential management
@@ -148,7 +148,7 @@ cd goated
 bash build.sh
 ```
 
-This builds three binaries: `./goated`, `./goated_daemon`, and `workspace/goat`.
+This builds three binaries: `./goated`, `./goated_daemon`, and `./goat`.
 
 ### Configure
 
@@ -217,25 +217,27 @@ Restarts wait for in-flight messages to flush. Reasons are logged to `logs/resta
 
 ## Agent CLI
 
+The agent's tmux session runs inside `workspace/`, so all agent commands use `./goat` (not `workspace/goat`).
+
 ```sh
 # Send message to user
-echo "Hello" | workspace/goat send_user_message --chat <chat_id>
+echo "Hello" | ./goat send_user_message --chat <chat_id>
 
 # Credentials
-workspace/goat creds set API_KEY value
-workspace/goat creds get API_KEY
-workspace/goat creds list
+./goat creds set API_KEY value
+./goat creds get API_KEY
+./goat creds list
 
 # Cron jobs
-workspace/goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt "Morning summary"
-workspace/goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt-file /path/to/prompt.md
-workspace/goat cron list
-workspace/goat cron disable <id>
-workspace/goat cron enable <id>
-workspace/goat cron remove <id>
+./goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt "Morning summary"
+./goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt-file /path/to/prompt.md
+./goat cron list
+./goat cron disable <id>
+./goat cron enable <id>
+./goat cron remove <id>
 
 # Subagents
-workspace/goat spawn-subagent --prompt "Run a background task"
+./goat spawn-subagent --prompt "Run a background task"
 ```
 
 ## Self-healing
