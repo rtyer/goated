@@ -20,6 +20,7 @@ type Config struct {
 	TelegramWebhookPath string
 	DefaultTimezone     string
 	ContextWindowTokens int
+	AdminChatID         string
 }
 
 func LoadConfig() Config {
@@ -44,6 +45,7 @@ func LoadConfig() Config {
 		TelegramWebhookPath: getenvDefault("GOAT_TELEGRAM_WEBHOOK_PATH", "/telegram/webhook"),
 		DefaultTimezone:     tz,
 		ContextWindowTokens: ctxTokens,
+		AdminChatID:         os.Getenv("GOAT_ADMIN_CHAT_ID"),
 	}
 }
 

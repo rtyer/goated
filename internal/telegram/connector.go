@@ -14,8 +14,16 @@ import (
 	"goated/internal/util"
 )
 
+// OffsetStore persists the last processed Telegram update ID so restarts
+// don't replay old messages.
+type OffsetStore interface {
+	GetMeta(key string) string
+	SetMeta(key, value string) error
+}
+
 type Connector struct {
-	bot *tgbotapi.BotAPI
+	bot   *tgbotapi.BotAPI
+	store OffsetStore
 }
 
 type RunMode string
@@ -31,12 +39,12 @@ type WebhookOptions struct {
 	Path       string
 }
 
-func NewConnector(token string) (*Connector, error) {
+func NewConnector(token string, store OffsetStore) (*Connector, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("init telegram bot: %w", err)
 	}
-	return &Connector{bot: bot}, nil
+	return &Connector{bot: bot, store: store}, nil
 }
 
 func (c *Connector) Run(ctx context.Context, handler gateway.Handler, mode RunMode, webhookOpts WebhookOptions) error {
@@ -50,12 +58,37 @@ func (c *Connector) Run(ctx context.Context, handler gateway.Handler, mode RunMo
 	}
 }
 
+const metaKeyTelegramOffset = "telegram_update_offset"
+
+func (c *Connector) loadOffset() int {
+	if c.store == nil {
+		return 0
+	}
+	raw := c.store.GetMeta(metaKeyTelegramOffset)
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+func (c *Connector) saveOffset(offset int) {
+	if c.store == nil {
+		return
+	}
+	_ = c.store.SetMeta(metaKeyTelegramOffset, strconv.Itoa(offset))
+}
+
 func (c *Connector) runPolling(ctx context.Context, handler gateway.Handler) error {
 	if _, err := c.bot.Request(tgbotapi.DeleteWebhookConfig{DropPendingUpdates: false}); err != nil {
 		return fmt.Errorf("delete webhook before polling: %w", err)
 	}
 
-	u := tgbotapi.NewUpdate(0)
+	offset := c.loadOffset()
+	u := tgbotapi.NewUpdate(offset)
 	u.Timeout = 30
 	updates := c.bot.GetUpdatesChan(u)
 	defer c.bot.StopReceivingUpdates()
@@ -65,6 +98,9 @@ func (c *Connector) runPolling(ctx context.Context, handler gateway.Handler) err
 		case <-ctx.Done():
 			return ctx.Err()
 		case update := <-updates:
+			// Persist offset so restarts don't replay old messages
+			c.saveOffset(update.UpdateID + 1)
+
 			if err := c.processUpdate(ctx, handler, update); err != nil {
 				chatID := "unknown"
 				if update.Message != nil {

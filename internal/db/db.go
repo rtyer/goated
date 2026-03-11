@@ -12,8 +12,10 @@ import (
 )
 
 var (
-	cronsBucket    = []byte("crons")
-	cronRunsBucket = []byte("cron_runs")
+	cronsBucket        = []byte("crons")
+	cronRunsBucket     = []byte("cron_runs")
+	subagentRunsBucket = []byte("subagent_runs")
+	metaBucket         = []byte("meta")
 )
 
 type Store struct {
@@ -48,11 +50,12 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open bolt: %w", err)
 	}
 	err = bdb.Update(func(tx *bolt.Tx) error {
-		if _, err := tx.CreateBucketIfNotExists(cronsBucket); err != nil {
-			return err
+		for _, bucket := range [][]byte{cronsBucket, cronRunsBucket, subagentRunsBucket, metaBucket} {
+			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
+				return err
+			}
 		}
-		_, err := tx.CreateBucketIfNotExists(cronRunsBucket)
-		return err
+		return nil
 	})
 	if err != nil {
 		_ = bdb.Close()
@@ -204,6 +207,128 @@ func (s *Store) DeleteCron(id uint64) error {
 			return fmt.Errorf("cron %d not found", id)
 		}
 		return b.Delete(key)
+	})
+}
+
+// SubagentRun tracks a running or completed subagent process.
+type SubagentRun struct {
+	ID         uint64 `json:"id"`
+	PID        int    `json:"pid"`
+	Source     string `json:"source"` // "cron", "cli", "gateway"
+	CronID     uint64 `json:"cron_id,omitempty"`
+	ChatID     string `json:"chat_id,omitempty"`
+	Prompt     string `json:"prompt"`
+	Status     string `json:"status"` // "running", "ok", "error"
+	LogPath    string `json:"log_path"`
+	StartedAt  string `json:"started_at"`
+	FinishedAt string `json:"finished_at,omitempty"`
+}
+
+func (s *Store) RecordSubagentStart(pid int, source string, cronID uint64, chatID, prompt, logPath string) (uint64, error) {
+	var id uint64
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(subagentRunsBucket)
+		seq, _ := b.NextSequence()
+		id = seq
+		run := SubagentRun{
+			ID:        id,
+			PID:       pid,
+			Source:    source,
+			CronID:    cronID,
+			ChatID:    chatID,
+			Prompt:    prompt,
+			Status:    "running",
+			LogPath:   logPath,
+			StartedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		data, err := json.Marshal(run)
+		if err != nil {
+			return err
+		}
+		return b.Put(itob(id), data)
+	})
+	return id, err
+}
+
+func (s *Store) RecordSubagentFinish(id uint64, status string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(subagentRunsBucket)
+		key := itob(id)
+		data := b.Get(key)
+		if data == nil {
+			return fmt.Errorf("subagent run %d not found", id)
+		}
+		var run SubagentRun
+		if err := json.Unmarshal(data, &run); err != nil {
+			return err
+		}
+		run.Status = status
+		run.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+		updated, err := json.Marshal(run)
+		if err != nil {
+			return err
+		}
+		return b.Put(key, updated)
+	})
+}
+
+func (s *Store) RunningSubagents() ([]SubagentRun, error) {
+	var runs []SubagentRun
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(subagentRunsBucket)
+		return b.ForEach(func(k, v []byte) error {
+			var run SubagentRun
+			if err := json.Unmarshal(v, &run); err != nil {
+				return nil
+			}
+			if run.Status == "running" {
+				runs = append(runs, run)
+			}
+			return nil
+		})
+	})
+	return runs, err
+}
+
+// CronJobRunning returns true if there is a subagent_run with the given
+// cronID that is still in status "running".
+func (s *Store) CronJobRunning(cronID uint64) bool {
+	var running bool
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(subagentRunsBucket)
+		return b.ForEach(func(k, v []byte) error {
+			var run SubagentRun
+			if err := json.Unmarshal(v, &run); err != nil {
+				return nil
+			}
+			if run.CronID == cronID && run.Status == "running" {
+				running = true
+			}
+			return nil
+		})
+	})
+	return running
+}
+
+// GetMeta returns a string value for the given key, or "" if not set.
+func (s *Store) GetMeta(key string) string {
+	var val string
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(metaBucket)
+		data := b.Get([]byte(key))
+		if data != nil {
+			val = string(data)
+		}
+		return nil
+	})
+	return val
+}
+
+// SetMeta stores a string value for the given key.
+func (s *Store) SetMeta(key, value string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(metaBucket)
+		return b.Put([]byte(key), []byte(value))
 	})
 }
 

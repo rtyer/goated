@@ -47,9 +47,10 @@ var gatewayTelegramCmd = &cobra.Command{
 			Bridge:          bridge,
 			Store:           database,
 			DefaultTimezone: cfg.DefaultTimezone,
+			AdminChatID:     cfg.AdminChatID,
 		}
 
-		conn, err := telegram.NewConnector(cfg.TelegramBotToken)
+		conn, err := telegram.NewConnector(cfg.TelegramBotToken, database)
 		if err != nil {
 			return err
 		}

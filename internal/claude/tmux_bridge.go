@@ -24,11 +24,98 @@ func (b *TmuxBridge) SendAndWait(ctx context.Context, chatID string, userPrompt 
 
 	target := b.sessionName() + ":0.0"
 
+	// If Claude is already busy (orphaned work from a previous daemon),
+	// wait up to 2 minutes for it to finish. If stalled, clear and re-send.
+	if busy, _ := b.isSessionBusy(ctx); busy {
+		fmt.Fprintf(os.Stderr, "[%s] session busy on startup, waiting for existing work to finish...\n",
+			time.Now().Format(time.RFC3339))
+		finished := b.waitForIdleOrStall(ctx, target, 2*time.Minute)
+		if !finished {
+			fmt.Fprintf(os.Stderr, "[%s] session stalled, sending Escape and retrying\n",
+				time.Now().Format(time.RFC3339))
+			// Send Escape to cancel any stuck input, then wait for prompt
+			_ = runTmux(ctx, "send-keys", "-t", target, "Escape")
+			time.Sleep(2 * time.Second)
+			// If still not at prompt, kill and restart the session
+			if busy2, _ := b.isSessionBusy(ctx); busy2 {
+				fmt.Fprintf(os.Stderr, "[%s] still stuck after Escape, restarting session\n",
+					time.Now().Format(time.RFC3339))
+				if err := b.RestartSession(ctx); err != nil {
+					return err
+				}
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "[%s] existing work finished, proceeding\n",
+				time.Now().Format(time.RFC3339))
+		}
+	}
+
 	wrapped := buildPromptEnvelope(chatID, userPrompt)
 	if err := b.sendKeys(ctx, wrapped); err != nil {
 		return err
 	}
 	return b.waitForPromptReturn(ctx, target, timeout)
+}
+
+// isSessionBusy returns true if Claude is not at the ❯ prompt (i.e., working).
+func (b *TmuxBridge) isSessionBusy(ctx context.Context) (bool, error) {
+	target := b.sessionName() + ":0.0"
+	snap, err := capturePane(ctx, target)
+	if err != nil {
+		return false, err
+	}
+	lines := strings.Split(strings.TrimRight(snap, "\n "), "\n")
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-5; i-- {
+		if strings.Contains(lines[i], "❯") {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// waitForIdleOrStall waits up to timeout for Claude to return to ❯.
+// Returns true if it finished, false if the pane stopped changing (stalled).
+func (b *TmuxBridge) waitForIdleOrStall(ctx context.Context, target string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	var lastSnap string
+	unchangedCount := 0
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+
+		snap, err := capturePane(ctx, target)
+		if err != nil {
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		// Check if Claude returned to prompt
+		lines := strings.Split(strings.TrimRight(snap, "\n "), "\n")
+		for i := len(lines) - 1; i >= 0 && i >= len(lines)-5; i-- {
+			if strings.Contains(lines[i], "❯") {
+				return true
+			}
+		}
+
+		// Track whether the pane is changing
+		if snap == lastSnap {
+			unchangedCount++
+			// 30 seconds of no change = stalled
+			if unchangedCount >= 10 {
+				return false
+			}
+		} else {
+			unchangedCount = 0
+			lastSnap = snap
+		}
+
+		time.Sleep(3 * time.Second)
+	}
+	return false
 }
 
 func (b *TmuxBridge) EnsureSession(ctx context.Context) error {
@@ -80,6 +167,55 @@ func (b *TmuxBridge) ContextUsagePercent(_ string) int {
 		return 100
 	}
 	return pct
+}
+
+// SessionHealthy checks if the Claude Code session is in a usable state.
+// Returns an error describing the problem if unhealthy, nil if OK.
+func (b *TmuxBridge) SessionHealthy(ctx context.Context) error {
+	session := b.sessionName()
+	if err := runTmux(ctx, "has-session", "-t", session); err != nil {
+		return fmt.Errorf("no tmux session")
+	}
+
+	target := session + ":0.0"
+	snap, err := capturePane(ctx, target)
+	if err != nil {
+		return fmt.Errorf("cannot capture pane: %w", err)
+	}
+
+	// Check last ~20 lines for error indicators
+	lines := strings.Split(snap, "\n")
+	start := 0
+	if len(lines) > 20 {
+		start = len(lines) - 20
+	}
+	tail := strings.Join(lines[start:], "\n")
+
+	errorPatterns := []string{
+		"API Error: 401",
+		"authentication_error",
+		"OAuth token has expired",
+		"Please run /login",
+		"API Error: 403",
+		"overloaded_error",
+		"Could not connect",
+	}
+	for _, pat := range errorPatterns {
+		if strings.Contains(tail, pat) {
+			return fmt.Errorf("session error: %s", pat)
+		}
+	}
+
+	return nil
+}
+
+// RestartSession kills the existing session and starts a fresh one.
+func (b *TmuxBridge) RestartSession(ctx context.Context) error {
+	session := b.sessionName()
+	_ = runTmux(ctx, "kill-session", "-t", session)
+	// Small delay to let the process clean up
+	time.Sleep(2 * time.Second)
+	return b.EnsureSession(ctx)
 }
 
 func (b *TmuxBridge) sessionName() string {

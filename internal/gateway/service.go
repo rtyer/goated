@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ type Service struct {
 	Bridge          *claude.TmuxBridge
 	Store           *db.Store
 	DefaultTimezone string
+	AdminChatID     string // chat ID for escalation alerts
 
 	// DrainCtx is a context that stays alive during graceful shutdown so
 	// in-flight handlers can finish. Set this to a context that only cancels
@@ -64,6 +66,11 @@ func (s *Service) HandleMessage(ctx context.Context, msg IncomingMessage, respon
 		return s.handleScheduleCommand(ctx, msg, responder)
 	}
 
+	// Check session health before sending; retry with restart up to 5 times
+	if err := s.ensureHealthySession(ctx, responder); err != nil {
+		return responder.SendMessage(ctx, msg.ChatID, friendlyError(err))
+	}
+
 	if err := s.Bridge.SendAndWait(ctx, msg.ChatID, text, 30*time.Minute); err != nil {
 		return responder.SendMessage(ctx, msg.ChatID, friendlyError(err))
 	}
@@ -89,6 +96,57 @@ func (s *Service) handleScheduleCommand(ctx context.Context, msg IncomingMessage
 	return responder.SendMessage(ctx, msg.ChatID, "Saved scheduled job.")
 }
 
+const maxSessionRetries = 5
+
+// ensureHealthySession checks if the Claude session is healthy. If not, it
+// restarts it up to maxSessionRetries times (once per minute). After exhausting
+// retries, it DMs the admin to request manual intervention.
+func (s *Service) ensureHealthySession(ctx context.Context, responder Responder) error {
+	for attempt := 1; attempt <= maxSessionRetries; attempt++ {
+		if err := s.Bridge.SessionHealthy(ctx); err == nil {
+			return nil
+		} else {
+			fmt.Fprintf(os.Stderr, "[%s] session unhealthy (attempt %d/%d): %v\n",
+				time.Now().Format(time.RFC3339), attempt, maxSessionRetries, err)
+		}
+
+		// Try restarting
+		fmt.Fprintf(os.Stderr, "[%s] restarting Claude session...\n",
+			time.Now().Format(time.RFC3339))
+		if err := s.Bridge.RestartSession(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "[%s] restart failed: %v\n",
+				time.Now().Format(time.RFC3339), err)
+		}
+
+		// Check again immediately after restart
+		if err := s.Bridge.SessionHealthy(ctx); err == nil {
+			fmt.Fprintf(os.Stderr, "[%s] session recovered after restart\n",
+				time.Now().Format(time.RFC3339))
+			return nil
+		}
+
+		if attempt < maxSessionRetries {
+			// Wait 1 minute before next attempt
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(1 * time.Minute):
+			}
+		}
+	}
+
+	// Exhausted retries — alert admin
+	if s.AdminChatID != "" && responder != nil {
+		_ = responder.SendMessage(ctx, s.AdminChatID,
+			fmt.Sprintf("Claude Code session needs manual intervention. "+
+				"Tried restarting %d times over %d minutes but it won't recover. "+
+				"Check the server and run /clear or restart the daemon.",
+				maxSessionRetries, maxSessionRetries))
+	}
+
+	return fmt.Errorf("claude session unhealthy after %d restart attempts", maxSessionRetries)
+}
+
 func friendlyError(err error) string {
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -101,6 +159,8 @@ func friendlyError(err error) string {
 		return "Claude session failed to start. Try /clear to reset, or check that the daemon is healthy."
 	case strings.Contains(err.Error(), "paste not received"):
 		return "Failed to send your message to Claude. The session may be stuck — try /clear."
+	case strings.Contains(err.Error(), "unhealthy after"):
+		return "Claude Code session is down and couldn't be auto-restarted. The admin has been notified."
 	default:
 		return "Something went wrong talking to Claude: " + err.Error()
 	}

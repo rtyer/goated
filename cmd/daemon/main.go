@@ -85,10 +85,11 @@ func main() {
 		Bridge:          bridge,
 		Store:           store,
 		DefaultTimezone: cfg.DefaultTimezone,
+		AdminChatID:     cfg.AdminChatID,
 		DrainCtx:        drainCtx,
 	}
 
-	conn, err := telegram.NewConnector(cfg.TelegramBotToken)
+	conn, err := telegram.NewConnector(cfg.TelegramBotToken, store)
 	if err != nil {
 		fatal("init telegram: %v", err)
 	}

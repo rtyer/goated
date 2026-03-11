@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"goated/internal/db"
+	"goated/internal/subagent"
 )
 
 type Runner struct {
@@ -51,6 +51,12 @@ func (r *Runner) Run(ctx context.Context, now time.Time) error {
 
 	records := make([]runRecord, 0, len(jobs))
 	for _, job := range jobs {
+		// Skip if a previous run of this cron job is still in-flight
+		if r.Store.CronJobRunning(job.ID) {
+			fmt.Fprintf(os.Stderr, "[%s] cron #%d still running, skipping\n",
+				time.Now().Format(time.RFC3339), job.ID)
+			continue
+		}
 		rec, err := r.runOne(ctx, nowMinute, job)
 		if err != nil {
 			return err
@@ -87,6 +93,8 @@ func (r *Runner) dueJobs(nowMinute time.Time) ([]db.CronJob, error) {
 	return due, nil
 }
 
+const cronJobTimeout = 1 * time.Hour
+
 func (r *Runner) runOne(ctx context.Context, nowMinute time.Time, job db.CronJob) (runRecord, error) {
 	runMinute := nowMinute.Format(time.RFC3339)
 
@@ -94,14 +102,20 @@ func (r *Runner) runOne(ctx context.Context, nowMinute time.Time, job db.CronJob
 		return runRecord{}, fmt.Errorf("insert cron run: %w", err)
 	}
 
+	// Enforce a per-job timeout so hung subagents don't block the cron ticker forever
+	jobCtx, jobCancel := context.WithTimeout(ctx, cronJobTimeout)
+	defer jobCancel()
+
 	jobLog := filepath.Join(r.LogDir, "cron", "jobs", fmt.Sprintf("%s-cron-%d.log", nowMinute.Format("20060102-1504"), job.ID))
 	prompt := buildCronPrompt(job.ChatID, job.Prompt)
-	cmd := exec.CommandContext(ctx, "claude", "--dangerously-skip-permissions", "-p", prompt)
-	cmd.Dir = r.WorkspaceDir
-	output, err := cmd.CombinedOutput()
-	if writeErr := os.WriteFile(jobLog, output, 0o644); writeErr != nil {
-		return runRecord{}, fmt.Errorf("write job log: %w", writeErr)
-	}
+	_, err := subagent.RunSync(jobCtx, r.Store, subagent.RunOpts{
+		WorkspaceDir: r.WorkspaceDir,
+		Prompt:       prompt,
+		LogPath:      jobLog,
+		Source:       "cron",
+		CronID:       job.ID,
+		ChatID:       job.ChatID,
+	})
 	status := "ok"
 	if err != nil {
 		status = "error"

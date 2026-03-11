@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"goated/internal/app"
+	"goated/internal/db"
 )
 
 type restartRecord struct {
@@ -47,6 +48,12 @@ var daemonRestartCmd = &cobra.Command{
 		rec := restartRecord{
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 			Reason:    reason,
+		}
+
+		// Wait for in-flight subagents before stopping
+		if store, err := db.Open(cfg.DBPath); err == nil {
+			waitForSubagents(store)
+			store.Close()
 		}
 
 		// Stop existing daemon gracefully
@@ -157,6 +164,59 @@ var daemonStatusCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// waitForSubagents checks for running subagents and waits for them to finish.
+func waitForSubagents(store *db.Store) {
+	running, err := store.RunningSubagents()
+	if err != nil || len(running) == 0 {
+		return
+	}
+
+	// Filter to actually-alive processes
+	var alive []db.SubagentRun
+	for _, r := range running {
+		proc, err := os.FindProcess(r.PID)
+		if err != nil {
+			continue
+		}
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			// Process already exited — mark it done
+			_ = store.RecordSubagentFinish(r.ID, "ok")
+			continue
+		}
+		alive = append(alive, r)
+	}
+
+	if len(alive) == 0 {
+		return
+	}
+
+	fmt.Printf("Waiting for %d in-flight subagent(s) to finish...\n", len(alive))
+	for _, r := range alive {
+		fmt.Printf("  pid=%d source=%s log=%s\n", r.PID, r.Source, r.LogPath)
+	}
+
+	deadline := time.Now().Add(3 * time.Minute)
+	for time.Now().Before(deadline) {
+		allDone := true
+		for _, r := range alive {
+			proc, err := os.FindProcess(r.PID)
+			if err != nil {
+				continue
+			}
+			if err := proc.Signal(syscall.Signal(0)); err == nil {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			fmt.Println("All subagents finished.")
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+	fmt.Fprintln(os.Stderr, "Subagent wait timeout (3m), proceeding with restart.")
 }
 
 // stopDaemon sends SIGTERM and waits for the process to exit (up to 3 minutes
