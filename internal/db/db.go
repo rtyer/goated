@@ -16,20 +16,23 @@ var (
 	cronRunsBucket     = []byte("cron_runs")
 	subagentRunsBucket = []byte("subagent_runs")
 	metaBucket         = []byte("meta")
+
+	allBuckets = [][]byte{cronsBucket, cronRunsBucket, subagentRunsBucket, metaBucket}
 )
 
 type Store struct {
-	db *bolt.DB
+	path string
 }
 
 type CronJob struct {
-	ID        uint64 `json:"id"`
-	ChatID    string `json:"chat_id"`
-	Schedule  string `json:"schedule"`
-	Prompt    string `json:"prompt"`
-	Timezone  string `json:"timezone"`
-	Active    bool   `json:"active"`
-	CreatedAt string `json:"created_at"`
+	ID         uint64 `json:"id"`
+	ChatID     string `json:"chat_id"`
+	Schedule   string `json:"schedule"`
+	Prompt     string `json:"prompt,omitempty"`
+	PromptFile string `json:"prompt_file,omitempty"`
+	Timezone   string `json:"timezone"`
+	Active     bool   `json:"active"`
+	CreatedAt  string `json:"created_at"`
 }
 
 type CronRun struct {
@@ -45,12 +48,13 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir db dir: %w", err)
 	}
+	// Open once to ensure buckets exist, then close immediately.
 	bdb, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 2 * time.Second})
 	if err != nil {
 		return nil, fmt.Errorf("open bolt: %w", err)
 	}
 	err = bdb.Update(func(tx *bolt.Tx) error {
-		for _, bucket := range [][]byte{cronsBucket, cronRunsBucket, subagentRunsBucket, metaBucket} {
+		for _, bucket := range allBuckets {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}
@@ -61,27 +65,60 @@ func Open(path string) (*Store, error) {
 		_ = bdb.Close()
 		return nil, fmt.Errorf("init buckets: %w", err)
 	}
-	return &Store{db: bdb}, nil
+	if err := bdb.Close(); err != nil {
+		return nil, fmt.Errorf("close after init: %w", err)
+	}
+	return &Store{path: path}, nil
 }
 
+// Close is a no-op since we no longer hold a persistent handle.
 func (s *Store) Close() error {
-	return s.db.Close()
+	return nil
 }
 
-func (s *Store) AddCron(chatID, schedule, prompt, timezone string) (uint64, error) {
+// open acquires the DB for a short-lived operation.
+func (s *Store) open() (*bolt.DB, error) {
+	return bolt.Open(s.path, 0o600, &bolt.Options{Timeout: 5 * time.Second})
+}
+
+// view opens the DB, runs a read-only transaction, and closes the DB.
+func (s *Store) view(fn func(tx *bolt.Tx) error) error {
+	bdb, err := s.open()
+	if err != nil {
+		return fmt.Errorf("open bolt: %w", err)
+	}
+	defer bdb.Close()
+	return bdb.View(fn)
+}
+
+// update opens the DB, runs a read-write transaction, and closes the DB.
+func (s *Store) update(fn func(tx *bolt.Tx) error) error {
+	bdb, err := s.open()
+	if err != nil {
+		return fmt.Errorf("open bolt: %w", err)
+	}
+	defer bdb.Close()
+	return bdb.Update(fn)
+}
+
+func (s *Store) AddCron(chatID, schedule, prompt, promptFile, timezone string) (uint64, error) {
+	if prompt == "" && promptFile == "" {
+		return 0, fmt.Errorf("either prompt or prompt_file is required")
+	}
 	var id uint64
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err := s.update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cronsBucket)
 		seq, _ := b.NextSequence()
 		id = seq
 		job := CronJob{
-			ID:        id,
-			ChatID:    chatID,
-			Schedule:  schedule,
-			Prompt:    prompt,
-			Timezone:  timezone,
-			Active:    true,
-			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			ID:         id,
+			ChatID:     chatID,
+			Schedule:   schedule,
+			Prompt:     prompt,
+			PromptFile: promptFile,
+			Timezone:   timezone,
+			Active:     true,
+			CreatedAt:  time.Now().UTC().Format(time.RFC3339),
 		}
 		data, err := json.Marshal(job)
 		if err != nil {
@@ -94,7 +131,7 @@ func (s *Store) AddCron(chatID, schedule, prompt, timezone string) (uint64, erro
 
 func (s *Store) ActiveCrons() ([]CronJob, error) {
 	var jobs []CronJob
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.view(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cronsBucket)
 		return b.ForEach(func(k, v []byte) error {
 			var job CronJob
@@ -111,7 +148,7 @@ func (s *Store) ActiveCrons() ([]CronJob, error) {
 }
 
 func (s *Store) RecordCronRun(cronID uint64, runMinute, status, userMsg, jobLogPath string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cronRunsBucket)
 		// Dedup: check if this cron+minute already recorded
 		dedupKey := fmt.Sprintf("%d:%s", cronID, runMinute)
@@ -148,7 +185,7 @@ func (s *Store) RecordCronRun(cronID uint64, runMinute, status, userMsg, jobLogP
 
 func (s *Store) AllCrons() ([]CronJob, error) {
 	var jobs []CronJob
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.view(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cronsBucket)
 		return b.ForEach(func(k, v []byte) error {
 			var job CronJob
@@ -164,7 +201,7 @@ func (s *Store) AllCrons() ([]CronJob, error) {
 
 func (s *Store) GetCron(id uint64) (*CronJob, error) {
 	var job CronJob
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.view(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cronsBucket)
 		data := b.Get(itob(id))
 		if data == nil {
@@ -179,7 +216,7 @@ func (s *Store) GetCron(id uint64) (*CronJob, error) {
 }
 
 func (s *Store) SetCronActive(id uint64, active bool) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cronsBucket)
 		key := itob(id)
 		data := b.Get(key)
@@ -200,7 +237,7 @@ func (s *Store) SetCronActive(id uint64, active bool) error {
 }
 
 func (s *Store) DeleteCron(id uint64) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cronsBucket)
 		key := itob(id)
 		if b.Get(key) == nil {
@@ -226,7 +263,7 @@ type SubagentRun struct {
 
 func (s *Store) RecordSubagentStart(pid int, source string, cronID uint64, chatID, prompt, logPath string) (uint64, error) {
 	var id uint64
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err := s.update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(subagentRunsBucket)
 		seq, _ := b.NextSequence()
 		id = seq
@@ -251,7 +288,7 @@ func (s *Store) RecordSubagentStart(pid int, source string, cronID uint64, chatI
 }
 
 func (s *Store) RecordSubagentFinish(id uint64, status string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(subagentRunsBucket)
 		key := itob(id)
 		data := b.Get(key)
@@ -274,7 +311,7 @@ func (s *Store) RecordSubagentFinish(id uint64, status string) error {
 
 func (s *Store) RunningSubagents() ([]SubagentRun, error) {
 	var runs []SubagentRun
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.view(func(tx *bolt.Tx) error {
 		b := tx.Bucket(subagentRunsBucket)
 		return b.ForEach(func(k, v []byte) error {
 			var run SubagentRun
@@ -294,7 +331,7 @@ func (s *Store) RunningSubagents() ([]SubagentRun, error) {
 // cronID that is still in status "running".
 func (s *Store) CronJobRunning(cronID uint64) bool {
 	var running bool
-	_ = s.db.View(func(tx *bolt.Tx) error {
+	_ = s.view(func(tx *bolt.Tx) error {
 		b := tx.Bucket(subagentRunsBucket)
 		return b.ForEach(func(k, v []byte) error {
 			var run SubagentRun
@@ -313,7 +350,7 @@ func (s *Store) CronJobRunning(cronID uint64) bool {
 // GetMeta returns a string value for the given key, or "" if not set.
 func (s *Store) GetMeta(key string) string {
 	var val string
-	_ = s.db.View(func(tx *bolt.Tx) error {
+	_ = s.view(func(tx *bolt.Tx) error {
 		b := tx.Bucket(metaBucket)
 		data := b.Get([]byte(key))
 		if data != nil {
@@ -326,7 +363,7 @@ func (s *Store) GetMeta(key string) string {
 
 // SetMeta stores a string value for the given key.
 func (s *Store) SetMeta(key, value string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(metaBucket)
 		return b.Put([]byte(key), []byte(value))
 	})

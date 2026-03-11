@@ -107,7 +107,20 @@ func (r *Runner) runOne(ctx context.Context, nowMinute time.Time, job db.CronJob
 	defer jobCancel()
 
 	jobLog := filepath.Join(r.LogDir, "cron", "jobs", fmt.Sprintf("%s-cron-%d.log", nowMinute.Format("20060102-1504"), job.ID))
-	prompt := buildCronPrompt(job.ChatID, job.Prompt)
+
+	userPrompt := job.Prompt
+	if job.PromptFile != "" {
+		data, err := os.ReadFile(job.PromptFile)
+		if err != nil {
+			return runRecord{}, fmt.Errorf("read prompt file %s: %w", job.PromptFile, err)
+		}
+		userPrompt = string(data)
+	}
+	if strings.TrimSpace(userPrompt) == "" {
+		return runRecord{}, fmt.Errorf("cron #%d has empty prompt", job.ID)
+	}
+
+	prompt := buildCronPrompt(job.ChatID, userPrompt)
 	_, err := subagent.RunSync(jobCtx, r.Store, subagent.RunOpts{
 		WorkspaceDir: r.WorkspaceDir,
 		Prompt:       prompt,

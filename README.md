@@ -54,5 +54,6 @@ Restart reasons are logged to `logs/restarts.jsonl` (gitignored). Starting the d
 - Set secret: `workspace/goat creds set GITHUB_API_KEY ghp_xxx`
 - Read secret: `workspace/goat creds get GITHUB_API_KEY`
 - List secrets: `workspace/goat creds list`
-- Add cron: `workspace/goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt "Send me Berkeley weather"`
+- Add cron (inline): `workspace/goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt "Send me Berkeley weather"`
+- Add cron (file): `workspace/goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt-file /path/to/prompt.md`
 - Run headless helper: `workspace/goat spawn-subagent --prompt "Check the weather API and summarize"`

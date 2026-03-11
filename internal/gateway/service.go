@@ -89,7 +89,7 @@ func (s *Service) handleScheduleCommand(ctx context.Context, msg IncomingMessage
 	if schedule == "" || prompt == "" {
 		return responder.SendMessage(ctx, msg.ChatID, "Both cron expression and prompt are required.")
 	}
-	_, err := s.Store.AddCron(msg.ChatID, schedule, prompt, s.DefaultTimezone)
+	_, err := s.Store.AddCron(msg.ChatID, schedule, prompt, "", s.DefaultTimezone)
 	if err != nil {
 		return responder.SendMessage(ctx, msg.ChatID, "Failed to save schedule: "+err.Error())
 	}

@@ -49,7 +49,8 @@ EOF
 
 ## Cron management
 
-- Add cron: `./goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt "Send me Berkeley weather"`
+- Add cron (inline): `./goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt "Send me Berkeley weather"`
+- Add cron (file): `./goat cron add --chat <chat_id> --schedule "0 8 * * *" --prompt-file /path/to/prompt.md`
 - List crons: `./goat cron list --chat <chat_id>`
 - Disable cron: `./goat cron disable <id>`
 - Enable cron: `./goat cron enable <id>`

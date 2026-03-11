@@ -43,17 +43,24 @@ var cronRunCmd = &cobra.Command{
 }
 
 var (
-	cronAddChat     string
-	cronAddSchedule string
-	cronAddPrompt   string
+	cronAddChat       string
+	cronAddSchedule   string
+	cronAddPrompt     string
+	cronAddPromptFile string
 )
 
 var cronAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a new cron job",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if cronAddChat == "" || cronAddSchedule == "" || cronAddPrompt == "" {
-			return fmt.Errorf("--chat, --schedule, and --prompt are required")
+		if cronAddChat == "" || cronAddSchedule == "" {
+			return fmt.Errorf("--chat and --schedule are required")
+		}
+		if cronAddPrompt == "" && cronAddPromptFile == "" {
+			return fmt.Errorf("either --prompt or --prompt-file is required")
+		}
+		if cronAddPrompt != "" && cronAddPromptFile != "" {
+			return fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
 		}
 		cfg := app.LoadConfig()
 		database, err := db.Open(cfg.DBPath)
@@ -62,7 +69,7 @@ var cronAddCmd = &cobra.Command{
 		}
 		defer database.Close()
 
-		id, err := database.AddCron(cronAddChat, cronAddSchedule, cronAddPrompt, cfg.DefaultTimezone)
+		id, err := database.AddCron(cronAddChat, cronAddSchedule, cronAddPrompt, cronAddPromptFile, cfg.DefaultTimezone)
 		if err != nil {
 			return err
 		}
@@ -108,7 +115,11 @@ var cronListCmd = &cobra.Command{
 			if !j.Active {
 				status = "disabled"
 			}
-			fmt.Printf("#%d [%s] schedule=%q chat=%s prompt=%q\n", j.ID, status, j.Schedule, j.ChatID, j.Prompt)
+			promptDisplay := fmt.Sprintf("prompt=%q", j.Prompt)
+			if j.PromptFile != "" {
+				promptDisplay = fmt.Sprintf("prompt-file=%q", j.PromptFile)
+			}
+			fmt.Printf("#%d [%s] schedule=%q chat=%s %s\n", j.ID, status, j.Schedule, j.ChatID, promptDisplay)
 		}
 		return nil
 	},
@@ -189,7 +200,8 @@ var cronRemoveCmd = &cobra.Command{
 func init() {
 	cronAddCmd.Flags().StringVar(&cronAddChat, "chat", "", "Chat ID for notifications")
 	cronAddCmd.Flags().StringVar(&cronAddSchedule, "schedule", "", "Cron schedule (5-field)")
-	cronAddCmd.Flags().StringVar(&cronAddPrompt, "prompt", "", "Prompt to execute")
+	cronAddCmd.Flags().StringVar(&cronAddPrompt, "prompt", "", "Inline prompt to execute")
+	cronAddCmd.Flags().StringVar(&cronAddPromptFile, "prompt-file", "", "Path to a prompt file (read at execution time)")
 
 	cronListCmd.Flags().StringVar(&cronListChat, "chat", "", "Filter by chat ID (optional)")
 
