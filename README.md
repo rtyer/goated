@@ -278,3 +278,7 @@ echo "Hello" | ./goat send_user_message --chat <chat_id>
 ## Migrating from OpenClaw
 
 See [docs/OPENCLAW_MIGRATION.md](docs/OPENCLAW_MIGRATION.md) for credential migration, cron migration, and example prompts.
+
+## License
+
+This project is dedicated to the public domain under [Creative Commons CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
