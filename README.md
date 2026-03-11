@@ -19,17 +19,20 @@ A self-healing bridge between Telegram and Claude Code. Send messages to your ag
 │ Telegram │ ──────> │   Gateway    │ ─────> │  Claude Code (tmux)     │
 │   User   │         │  (polling/   │  paste │  interactive session    │
 │          │ <────── │   webhook)   │ <───── │                         │
-└──────────┘         └──────────────┘  exec  └─────────────────────────┘
-    ^                    │                      │
-    │                    │                      │  ./goat send_user_message
-    │                    │                      v
-    └────────────────────┼──────────────── Telegram Bot API
-                         │
-                    ┌────v─────┐         ┌──────────────────┐
-                    │   Cron   │ ──────> │  Subagent         │
-                    │  Runner  │  spawn  │  (headless claude) │
-                    └──────────┘         └──────────────────┘
+└──────────┘         └──────────────┘  exec  └────────────┬────────────┘
+    ^                    │                      │          │
+    │                    │  ./goat send_user_   │          │ ./goat spawn-subagent
+    │                    │  message              │          │
+    │                    │                      v          v
+    └────────────────────┼──────────────── Telegram    ┌──────────────────┐
+                         │                 Bot API     │  Subagent         │
+                    ┌────v─────┐         ┌──────────>  │  (headless claude)│
+                    │   Cron   │ ──────> │             └──────────────────┘
+                    │  Runner  │  spawn  │
+                    └──────────┘         │
 ```
+
+Both the **cron runner** and **Claude Code itself** can spawn subagents. The cron runner does it on a schedule; Claude Code does it via `./goat spawn-subagent` when it wants to delegate a task to a parallel worker. All subagents are tracked in bbolt.
 
 **Steady-state message flow:**
 
