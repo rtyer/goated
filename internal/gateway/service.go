@@ -76,7 +76,10 @@ func (s *Service) HandleMessage(ctx context.Context, msg IncomingMessage, respon
 		return responder.SendMessage(ctx, msg.ChatID, fmt.Sprintf("Your chat ID is: %s", msg.ChatID))
 	case strings.EqualFold(text, "/context"):
 		pct := s.Bridge.ContextUsagePercent(msg.ChatID)
-		return responder.SendMessage(ctx, msg.ChatID, fmt.Sprintf("Approx context usage: %d%%", pct))
+		if pct < 0 {
+			return responder.SendMessage(ctx, msg.ChatID, "Could not read context usage (Claude may be busy).")
+		}
+		return responder.SendMessage(ctx, msg.ChatID, fmt.Sprintf("Context usage: %d%%", pct))
 	case strings.HasPrefix(text, "/schedule "):
 		return s.handleScheduleCommand(ctx, msg, responder)
 	}
@@ -249,7 +252,7 @@ func (s *Service) handleScheduleCommand(ctx context.Context, msg IncomingMessage
 	if schedule == "" || prompt == "" {
 		return responder.SendMessage(ctx, msg.ChatID, "Both cron expression and prompt are required.")
 	}
-	_, err := s.Store.AddCron(msg.ChatID, schedule, prompt, "", s.DefaultTimezone)
+	_, err := s.Store.AddCron("subagent", msg.ChatID, schedule, prompt, "", "", s.DefaultTimezone, false)
 	if err != nil {
 		return responder.SendMessage(ctx, msg.ChatID, "Failed to save schedule: "+err.Error())
 	}

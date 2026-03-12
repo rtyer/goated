@@ -1,6 +1,8 @@
 # goated
 
-A self-healing bridge between Telegram and Claude Code. Send messages to your agent via Telegram, get responses back. Includes cron jobs, subagents, credential management, and daemon lifecycle.
+A self-healing bridge between Slack/Telegram and Claude Code. Send messages to your agent via chat, get responses back. Includes cron jobs, subagents, credential management, and daemon lifecycle.
+
+> **For AI agents working on this codebase:** see [CODEBASE.md](CODEBASE.md) for architecture and [AGENTS.md](AGENTS.md) for build/run instructions.
 
 ## Architecture
 
@@ -206,7 +208,6 @@ All env vars:
 | `GOAT_WORKSPACE_DIR` | current directory | Agent working directory |
 | `GOAT_DB_PATH` | `./goated.db` | Path to bbolt database |
 | `GOAT_LOG_DIR` | `./logs` | Log directory |
-| `GOAT_CONTEXT_WINDOW_TOKENS` | `200000` | Context window size estimate |
 | `GOAT_TELEGRAM_WEBHOOK_URL` | | Public URL for webhook mode |
 | `GOAT_TELEGRAM_WEBHOOK_LISTEN_ADDR` | `:8080` | Listen address for webhook mode |
 | `GOAT_TELEGRAM_WEBHOOK_PATH` | `/telegram/webhook` | Webhook endpoint path |

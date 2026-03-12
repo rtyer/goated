@@ -27,11 +27,14 @@ type Store struct {
 
 type CronJob struct {
 	ID         uint64 `json:"id"`
+	Type       string `json:"type"`              // "subagent" (default) or "system"
 	ChatID     string `json:"chat_id"`
 	Schedule   string `json:"schedule"`
 	Prompt     string `json:"prompt,omitempty"`
 	PromptFile string `json:"prompt_file,omitempty"`
+	Command    string `json:"command,omitempty"` // shell command for type="system"
 	Timezone   string `json:"timezone"`
+	Silent     bool   `json:"silent"`
 	Active     bool   `json:"active"`
 	CreatedAt  string `json:"created_at"`
 }
@@ -102,9 +105,21 @@ func (s *Store) update(fn func(tx *bolt.Tx) error) error {
 	return bdb.Update(fn)
 }
 
-func (s *Store) AddCron(chatID, schedule, prompt, promptFile, timezone string) (uint64, error) {
-	if prompt == "" && promptFile == "" {
-		return 0, fmt.Errorf("either prompt or prompt_file is required")
+func (s *Store) AddCron(cronType, chatID, schedule, prompt, promptFile, command, timezone string, silent bool) (uint64, error) {
+	if cronType == "" {
+		cronType = "subagent"
+	}
+	switch cronType {
+	case "system":
+		if command == "" {
+			return 0, fmt.Errorf("system crons require --command")
+		}
+	case "subagent":
+		if prompt == "" && promptFile == "" {
+			return 0, fmt.Errorf("subagent crons require --prompt or --prompt-file")
+		}
+	default:
+		return 0, fmt.Errorf("unknown cron type %q (use subagent or system)", cronType)
 	}
 	var id uint64
 	err := s.update(func(tx *bolt.Tx) error {
@@ -113,11 +128,14 @@ func (s *Store) AddCron(chatID, schedule, prompt, promptFile, timezone string) (
 		id = seq
 		job := CronJob{
 			ID:         id,
+			Type:       cronType,
 			ChatID:     chatID,
 			Schedule:   schedule,
 			Prompt:     prompt,
 			PromptFile: promptFile,
+			Command:    command,
 			Timezone:   timezone,
+			Silent:     silent,
 			Active:     true,
 			CreatedAt:  time.Now().UTC().Format(time.RFC3339),
 		}
@@ -229,6 +247,27 @@ func (s *Store) SetCronActive(id uint64, active bool) error {
 			return err
 		}
 		job.Active = active
+		updated, err := json.Marshal(job)
+		if err != nil {
+			return err
+		}
+		return b.Put(key, updated)
+	})
+}
+
+func (s *Store) SetCronSilent(id uint64, silent bool) error {
+	return s.update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(cronsBucket)
+		key := itob(id)
+		data := b.Get(key)
+		if data == nil {
+			return fmt.Errorf("cron %d not found", id)
+		}
+		var job CronJob
+		if err := json.Unmarshal(data, &job); err != nil {
+			return err
+		}
+		job.Silent = silent
 		updated, err := json.Marshal(job)
 		if err != nil {
 			return err

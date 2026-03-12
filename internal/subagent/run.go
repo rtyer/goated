@@ -115,6 +115,7 @@ type RunOpts struct {
 	Source       string // "cron", "cli", "gateway"
 	CronID       uint64 // only for cron-sourced runs
 	ChatID       string
+	Silent       bool // suppress success notifications to main session
 }
 
 // handleCompletion records the subagent's final status and notifies the main
@@ -126,6 +127,10 @@ func handleCompletion(store *db.Store, runID uint64, runErr error, opts RunOpts)
 	}
 	if store != nil && runID > 0 {
 		_ = store.RecordSubagentFinish(runID, status)
+	}
+	// Silent crons skip notification on success; errors always notify.
+	if opts.Silent && status == "ok" {
+		return
 	}
 	notifyMainSession(opts, status)
 }

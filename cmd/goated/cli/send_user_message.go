@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"goated/internal/app"
+	slackpkg "goated/internal/slack"
 	"goated/internal/util"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -106,6 +107,21 @@ func sendViaSlack(cfg app.Config, channelID, text string) error {
 
 	client := slackapi.New(token)
 	mrkdwn := util.MarkdownToSlackMrkdwn(text)
+
+	// If there's a thinking indicator, update it with the real response
+	if data, err := os.ReadFile(slackpkg.ThinkingFile); err == nil && len(data) > 0 {
+		_ = os.Remove(slackpkg.ThinkingFile)
+		ts := strings.TrimSpace(string(data))
+		_, _, _, err := client.UpdateMessage(channelID, ts,
+			slackapi.MsgOptionText(mrkdwn, false),
+			slackapi.MsgOptionDisableLinkUnfurl(),
+		)
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "Updated thinking message in channel %s (%d chars)\n", channelID, len(text))
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "Failed to update thinking message: %v, posting new\n", err)
+	}
 
 	_, _, err := client.PostMessage(channelID,
 		slackapi.MsgOptionText(mrkdwn, false),

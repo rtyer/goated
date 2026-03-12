@@ -39,9 +39,8 @@ var gatewayTelegramCmd = &cobra.Command{
 		defer database.Close()
 
 		bridge := &claude.TmuxBridge{
-			WorkspaceDir:        cfg.WorkspaceDir,
-			LogDir:              cfg.LogDir,
-			ContextWindowTokens: cfg.ContextWindowTokens,
+			WorkspaceDir: cfg.WorkspaceDir,
+			LogDir:       cfg.LogDir,
 		}
 
 		svc := &gateway.Service{
@@ -96,9 +95,8 @@ var gatewaySlackCmd = &cobra.Command{
 		defer database.Close()
 
 		bridge := &claude.TmuxBridge{
-			WorkspaceDir:        cfg.WorkspaceDir,
-			LogDir:              cfg.LogDir,
-			ContextWindowTokens: cfg.ContextWindowTokens,
+			WorkspaceDir: cfg.WorkspaceDir,
+			LogDir:       cfg.LogDir,
 		}
 
 		svc := &gateway.Service{

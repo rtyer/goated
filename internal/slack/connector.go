@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -14,6 +15,10 @@ import (
 	"goated/internal/gateway"
 	"goated/internal/util"
 )
+
+// ThinkingFile is the path where the thinking message timestamp is stored
+// so that CLI processes (send_user_message) can update it with the real response.
+const ThinkingFile = "/tmp/goated-slack-thinking"
 
 // OffsetStore persists metadata so restarts can track state.
 type OffsetStore interface {
@@ -28,6 +33,9 @@ type Connector struct {
 	socket    *socketmode.Client
 	store     OffsetStore
 	channelID string // the single allowed DM channel
+
+	mu         sync.Mutex
+	thinkingTS string // timestamp of the current "_thinking..._" message
 }
 
 // NewConnector creates a Slack connector.
@@ -141,19 +149,23 @@ func (c *Connector) handleEventsAPI(ctx context.Context, handler gateway.Handler
 			Text:    text,
 		}
 
-		// Add a "thinking" reaction while processing
-		stopTyping := c.startTypingIndicator(ev.Channel, ev.TimeStamp)
-		defer stopTyping()
+		// Post a thinking indicator while processing
+		c.postThinking(ev.Channel)
 
 		if err := handler.HandleMessage(ctx, msg, c); err != nil {
 			_ = c.SendMessage(ctx, ev.Channel, "Error: "+err.Error())
 		}
+
+		// Clean up thinking if still present (e.g., handler returned without sending)
+		c.clearThinkingIfNeeded(ev.Channel)
 	}
 }
 
 // SendMessage sends a message to the specified Slack channel, converting
-// markdown to Slack's mrkdwn format.
+// markdown to Slack's mrkdwn format. Clears any active thinking indicator first.
 func (c *Connector) SendMessage(_ context.Context, channelID, text string) error {
+	c.clearThinkingIfNeeded(channelID)
+
 	mrkdwn := util.MarkdownToSlackMrkdwn(text)
 
 	// Slack has a 4000-char limit per message; split if needed
@@ -170,19 +182,38 @@ func (c *Connector) SendMessage(_ context.Context, channelID, text string) error
 	return nil
 }
 
-// startTypingIndicator adds an eyes emoji reaction to signal processing,
-// and returns a function to remove it when done.
-func (c *Connector) startTypingIndicator(channel, timestamp string) func() {
-	_ = c.api.AddReaction("eyes", slack.ItemRef{
-		Channel:   channel,
-		Timestamp: timestamp,
-	})
-	return func() {
-		_ = c.api.RemoveReaction("eyes", slack.ItemRef{
-			Channel:   channel,
-			Timestamp: timestamp,
-		})
+// postThinking posts a "_thinking..._" message and records its timestamp
+// so it can be updated with the real response or deleted later.
+func (c *Connector) postThinking(channel string) {
+	_, ts, err := c.api.PostMessage(channel,
+		slack.MsgOptionText("_thinking..._", false),
+	)
+	if err != nil {
+		return
 	}
+	c.mu.Lock()
+	c.thinkingTS = ts
+	c.mu.Unlock()
+	_ = os.WriteFile(ThinkingFile, []byte(ts), 0644)
+}
+
+// clearThinkingIfNeeded deletes the thinking message if it's still present.
+// It checks the file to avoid deleting a message that the CLI already updated.
+func (c *Connector) clearThinkingIfNeeded(channel string) {
+	c.mu.Lock()
+	ts := c.thinkingTS
+	c.thinkingTS = ""
+	c.mu.Unlock()
+	if ts == "" {
+		return
+	}
+	// If the file is gone, the CLI already handled the message (updated it
+	// with the real response), so don't delete it.
+	if _, err := os.Stat(ThinkingFile); err != nil {
+		return
+	}
+	_ = os.Remove(ThinkingFile)
+	_, _, _ = c.api.DeleteMessage(channel, ts)
 }
 
 // splitMessage breaks a message into chunks that fit Slack's size limit.

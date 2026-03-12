@@ -80,6 +80,15 @@ var bootstrapCmd = &cobra.Command{
 		}
 		fmt.Println("Wrote .env")
 
+		// Add hourly self-sync system cron
+		syncCmd := "./goat sync_self_to_github"
+		_, err = store.AddCron("system", "", "0 * * * *", "", "", syncCmd, tz, true)
+		if err != nil {
+			fmt.Printf("Warning: could not create sync cron: %v\n", err)
+		} else {
+			fmt.Println("Added hourly sync_self_to_github system cron.")
+		}
+
 		fmt.Println()
 		fmt.Println("Bootstrap complete. Run ./goated_daemon to start.")
 		return nil

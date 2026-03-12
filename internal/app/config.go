@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -21,9 +20,8 @@ type Config struct {
 	SlackBotToken       string
 	SlackAppToken       string
 	SlackChannelID      string
-	DefaultTimezone     string
-	ContextWindowTokens int
-	AdminChatID         string
+	DefaultTimezone string
+	AdminChatID     string
 }
 
 func LoadConfig() Config {
@@ -39,7 +37,6 @@ func LoadConfig() Config {
 	db := getenvDefault("GOAT_DB_PATH", filepath.Join(cwd, "goated.db"))
 	logDir := getenvDefault("GOAT_LOG_DIR", filepath.Join(cwd, "logs"))
 	tz := getenvDefault("GOAT_DEFAULT_TIMEZONE", "America/Los_Angeles")
-	ctxTokens := getenvIntDefault("GOAT_CONTEXT_WINDOW_TOKENS", 200000)
 
 	return Config{
 		WorkspaceDir:        workspace,
@@ -54,9 +51,8 @@ func LoadConfig() Config {
 		SlackBotToken:       os.Getenv("GOAT_SLACK_BOT_TOKEN"),
 		SlackAppToken:       os.Getenv("GOAT_SLACK_APP_TOKEN"),
 		SlackChannelID:      os.Getenv("GOAT_SLACK_CHANNEL_ID"),
-		DefaultTimezone:     tz,
-		ContextWindowTokens: ctxTokens,
-		AdminChatID:         os.Getenv("GOAT_ADMIN_CHAT_ID"),
+		DefaultTimezone: tz,
+		AdminChatID:     os.Getenv("GOAT_ADMIN_CHAT_ID"),
 	}
 }
 
@@ -96,16 +92,4 @@ func getenvDefault(k, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func getenvIntDefault(k string, fallback int) int {
-	v := os.Getenv(k)
-	if v == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return fallback
-	}
-	return n
 }

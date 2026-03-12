@@ -43,25 +43,37 @@ var cronRunCmd = &cobra.Command{
 }
 
 var (
+	cronAddType       string
 	cronAddChat       string
 	cronAddSchedule   string
 	cronAddPrompt     string
 	cronAddPromptFile string
+	cronAddCommand    string
 	cronAddTimezone   string
+	cronAddSilent     bool
 )
 
 var cronAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a new cron job",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if cronAddChat == "" || cronAddSchedule == "" {
-			return fmt.Errorf("--chat and --schedule are required")
+		if cronAddSchedule == "" {
+			return fmt.Errorf("--schedule is required")
 		}
-		if cronAddPrompt == "" && cronAddPromptFile == "" {
-			return fmt.Errorf("either --prompt or --prompt-file is required")
-		}
-		if cronAddPrompt != "" && cronAddPromptFile != "" {
-			return fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
+		if cronAddType == "system" {
+			if cronAddCommand == "" {
+				return fmt.Errorf("--command is required for system crons")
+			}
+		} else {
+			if cronAddChat == "" {
+				return fmt.Errorf("--chat is required for subagent crons")
+			}
+			if cronAddPrompt == "" && cronAddPromptFile == "" {
+				return fmt.Errorf("either --prompt or --prompt-file is required")
+			}
+			if cronAddPrompt != "" && cronAddPromptFile != "" {
+				return fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
+			}
 		}
 		cfg := app.LoadConfig()
 
@@ -79,7 +91,7 @@ var cronAddCmd = &cobra.Command{
 		}
 		defer database.Close()
 
-		id, err := database.AddCron(cronAddChat, cronAddSchedule, cronAddPrompt, cronAddPromptFile, tz)
+		id, err := database.AddCron(cronAddType, cronAddChat, cronAddSchedule, cronAddPrompt, cronAddPromptFile, cronAddCommand, tz, cronAddSilent)
 		if err != nil {
 			return err
 		}
@@ -125,15 +137,26 @@ var cronListCmd = &cobra.Command{
 			if !j.Active {
 				status = "disabled"
 			}
-			promptDisplay := fmt.Sprintf("prompt=%q", j.Prompt)
-			if j.PromptFile != "" {
-				promptDisplay = fmt.Sprintf("prompt-file=%q", j.PromptFile)
+			if j.Silent {
+				status += ",silent"
+			}
+			jobType := j.Type
+			if jobType == "" {
+				jobType = "subagent"
 			}
 			tzDisplay := j.Timezone
 			if tzDisplay == "" {
 				tzDisplay = "UTC"
 			}
-			fmt.Printf("#%d [%s] schedule=%q tz=%s chat=%s %s\n", j.ID, status, j.Schedule, tzDisplay, j.ChatID, promptDisplay)
+			var detail string
+			if jobType == "system" {
+				detail = fmt.Sprintf("command=%q", j.Command)
+			} else if j.PromptFile != "" {
+				detail = fmt.Sprintf("prompt-file=%q", j.PromptFile)
+			} else {
+				detail = fmt.Sprintf("prompt=%q", j.Prompt)
+			}
+			fmt.Printf("#%d [%s] type=%s schedule=%q tz=%s chat=%s %s\n", j.ID, status, jobType, j.Schedule, tzDisplay, j.ChatID, detail)
 		}
 		return nil
 	},
@@ -264,15 +287,46 @@ var cronSetTimezoneCmd = &cobra.Command{
 	},
 }
 
+var cronSetSilentCmd = &cobra.Command{
+	Use:   "set-silent ID true|false",
+	Short: "Set whether a cron job suppresses success notifications",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseUint(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid ID: %w", err)
+		}
+		silent, err := strconv.ParseBool(args[1])
+		if err != nil {
+			return fmt.Errorf("invalid bool %q: use true or false", args[1])
+		}
+		cfg := app.LoadConfig()
+		database, err := db.Open(cfg.DBPath)
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		if err := database.SetCronSilent(id, silent); err != nil {
+			return err
+		}
+		fmt.Printf("Set cron %d silent=%v\n", id, silent)
+		return nil
+	},
+}
+
 func init() {
+	cronAddCmd.Flags().StringVar(&cronAddType, "type", "subagent", "Cron type: subagent or system")
 	cronAddCmd.Flags().StringVar(&cronAddChat, "chat", "", "Chat ID for notifications")
 	cronAddCmd.Flags().StringVar(&cronAddSchedule, "schedule", "", "Cron schedule (5-field)")
-	cronAddCmd.Flags().StringVar(&cronAddPrompt, "prompt", "", "Inline prompt to execute")
-	cronAddCmd.Flags().StringVar(&cronAddPromptFile, "prompt-file", "", "Path to a prompt file (read at execution time)")
+	cronAddCmd.Flags().StringVar(&cronAddPrompt, "prompt", "", "Inline prompt to execute (subagent)")
+	cronAddCmd.Flags().StringVar(&cronAddPromptFile, "prompt-file", "", "Path to a prompt file (subagent)")
+	cronAddCmd.Flags().StringVar(&cronAddCommand, "command", "", "Shell command to run (system)")
 	cronAddCmd.Flags().StringVar(&cronAddTimezone, "timezone", "", "IANA timezone (e.g. UTC, America/Los_Angeles). Defaults to GOAT_DEFAULT_TIMEZONE.")
+	cronAddCmd.Flags().BoolVar(&cronAddSilent, "silent", false, "Suppress success notifications to the main session")
 
 	cronListCmd.Flags().StringVar(&cronListChat, "chat", "", "Filter by chat ID (optional)")
 
-	cronCmd.AddCommand(cronRunCmd, cronAddCmd, cronListCmd, cronEnableCmd, cronDisableCmd, cronRemoveCmd, cronSetScheduleCmd, cronSetTimezoneCmd)
+	cronCmd.AddCommand(cronRunCmd, cronAddCmd, cronListCmd, cronEnableCmd, cronDisableCmd, cronRemoveCmd, cronSetScheduleCmd, cronSetTimezoneCmd, cronSetSilentCmd)
 	rootCmd.AddCommand(cronCmd)
 }

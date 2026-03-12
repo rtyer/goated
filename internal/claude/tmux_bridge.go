@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,9 +14,8 @@ import (
 )
 
 type TmuxBridge struct {
-	WorkspaceDir        string
-	LogDir              string
-	ContextWindowTokens int
+	WorkspaceDir string
+	LogDir       string
 }
 
 func (b *TmuxBridge) SendAndWait(ctx context.Context, channel, chatID string, userPrompt string, _ time.Duration) error {
@@ -117,23 +118,45 @@ func (b *TmuxBridge) ClearSession(ctx context.Context, _ string) error {
 	return b.EnsureSession(ctx)
 }
 
+// ContextUsagePercent pastes /context into the Claude Code session and parses
+// the real token usage percentage from the output.
 func (b *TmuxBridge) ContextUsagePercent(_ string) int {
-	// Rough estimate from scrollback size
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	out, err := tmux.CapturePane(ctx)
+
+	// Only check when Claude is idle at the prompt
+	busy, err := b.IsSessionBusy(ctx)
+	if err != nil || busy {
+		return -1
+	}
+
+	if err := tmux.PasteAndEnter(ctx, "/context"); err != nil {
+		return -1
+	}
+
+	// Wait for Claude to process the command and return to prompt
+	if err := tmux.WaitForIdle(ctx, 15*time.Second); err != nil {
+		return -1
+	}
+
+	out, err := tmux.CaptureVisible(ctx)
 	if err != nil {
-		return 0
+		return -1
 	}
-	estTokens := len(out) / 4
-	if b.ContextWindowTokens <= 0 {
-		return 0
+
+	return parseContextOutput(out)
+}
+
+// contextPctRe matches the summary line from /context output:
+//   "claude-opus-4-6 · 85k/200k tokens (42%)"
+var contextPctRe = regexp.MustCompile(`[\d.]+k/[\d.]+k\s+tokens\s+\((\d+)%\)`)
+
+func parseContextOutput(output string) int {
+	if m := contextPctRe.FindStringSubmatch(output); len(m) > 1 {
+		pct, _ := strconv.Atoi(m[1])
+		return pct
 	}
-	pct := estTokens * 100 / b.ContextWindowTokens
-	if pct > 100 {
-		return 100
-	}
-	return pct
+	return -1
 }
 
 // SessionHealthy checks if the Claude Code session is in a usable state.

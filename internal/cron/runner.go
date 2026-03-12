@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -102,44 +103,23 @@ func (r *Runner) runOne(ctx context.Context, nowMinute time.Time, job db.CronJob
 		return runRecord{}, fmt.Errorf("insert cron run: %w", err)
 	}
 
-	// Enforce a per-job timeout so hung subagents don't block the cron ticker forever
 	jobCtx, jobCancel := context.WithTimeout(ctx, cronJobTimeout)
 	defer jobCancel()
 
 	jobLog := filepath.Join(r.LogDir, "cron", "jobs", fmt.Sprintf("%s-cron-%d.log", nowMinute.Format("20060102-1504"), job.ID))
 
-	userPrompt := job.Prompt
-	if job.PromptFile != "" {
-		data, err := os.ReadFile(job.PromptFile)
-		if err != nil {
-			return runRecord{}, fmt.Errorf("read prompt file %s: %w", job.PromptFile, err)
-		}
-		userPrompt = string(data)
-	}
-	if strings.TrimSpace(userPrompt) == "" {
-		return runRecord{}, fmt.Errorf("cron #%d has empty prompt", job.ID)
-	}
-
-	prompt := subagent.BuildPrompt("Read CRON.md before executing.", userPrompt, job.ChatID, "cron", jobLog)
-	_, err := subagent.RunSync(jobCtx, r.Store, subagent.RunOpts{
-		WorkspaceDir: r.WorkspaceDir,
-		Prompt:       prompt,
-		LogPath:      jobLog,
-		Source:       "cron",
-		CronID:       job.ID,
-		ChatID:       job.ChatID,
-	})
-	status := "ok"
-	if err != nil {
-		status = "error"
+	var status string
+	if job.Type == "system" {
+		status = r.runSystem(jobCtx, job, jobLog)
+	} else {
+		status = r.runSubagent(jobCtx, job, jobLog)
 	}
 
 	if err := r.Store.RecordCronRun(job.ID, runMinute, status, "", jobLog); err != nil {
 		return runRecord{}, fmt.Errorf("update cron run: %w", err)
 	}
 
-	// On error, notify the user so they know something went wrong
-	if status == "error" && r.Notifier != nil {
+	if status == "error" && r.Notifier != nil && job.ChatID != "" {
 		errNotify := fmt.Sprintf("Cron job #%d failed. Check log: %s", job.ID, jobLog)
 		_ = r.Notifier.SendMessage(ctx, job.ChatID, errNotify)
 	}
@@ -152,6 +132,62 @@ func (r *Runner) runOne(ctx context.Context, nowMinute time.Time, job db.CronJob
 		Status:     status,
 		JobLogPath: jobLog,
 	}, nil
+}
+
+func (r *Runner) runSubagent(ctx context.Context, job db.CronJob, jobLog string) string {
+	userPrompt := job.Prompt
+	if job.PromptFile != "" {
+		data, err := os.ReadFile(job.PromptFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cron #%d: read prompt file: %v\n", job.ID, err)
+			return "error"
+		}
+		userPrompt = string(data)
+	}
+	if strings.TrimSpace(userPrompt) == "" {
+		fmt.Fprintf(os.Stderr, "cron #%d: empty prompt\n", job.ID)
+		return "error"
+	}
+
+	promptChatID := job.ChatID
+	if job.Silent {
+		promptChatID = ""
+	}
+	prompt := subagent.BuildPrompt("Read CRON.md before executing.", userPrompt, promptChatID, "cron", jobLog)
+	_, err := subagent.RunSync(ctx, r.Store, subagent.RunOpts{
+		WorkspaceDir: r.WorkspaceDir,
+		Prompt:       prompt,
+		LogPath:      jobLog,
+		Source:       "cron",
+		CronID:       job.ID,
+		ChatID:       job.ChatID,
+		Silent:       job.Silent,
+	})
+	if err != nil {
+		return "error"
+	}
+	return "ok"
+}
+
+func (r *Runner) runSystem(ctx context.Context, job db.CronJob, jobLog string) string {
+	logFile, err := os.Create(jobLog)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cron #%d: create log: %v\n", job.ID, err)
+		return "error"
+	}
+	defer logFile.Close()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", job.Command)
+	cmd.Dir = r.WorkspaceDir
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	fmt.Fprintf(logFile, "$ %s\n\n", job.Command)
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(logFile, "\n[exit error: %v]\n", err)
+		return "error"
+	}
+	return "ok"
 }
 
 func appendRunRecords(path string, records []runRecord) error {

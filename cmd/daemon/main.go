@@ -69,9 +69,8 @@ func main() {
 	defer store.Close()
 
 	bridge := &claude.TmuxBridge{
-		WorkspaceDir:        cfg.WorkspaceDir,
-		LogDir:              cfg.LogDir,
-		ContextWindowTokens: cfg.ContextWindowTokens,
+		WorkspaceDir: cfg.WorkspaceDir,
+		LogDir:       cfg.LogDir,
 	}
 
 	// drainCtx stays alive during shutdown so in-flight handlers can finish

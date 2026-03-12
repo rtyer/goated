@@ -16,9 +16,8 @@ import (
 func makeBridge() *claude.TmuxBridge {
 	cfg := app.LoadConfig()
 	return &claude.TmuxBridge{
-		WorkspaceDir:        cfg.WorkspaceDir,
-		LogDir:              cfg.LogDir,
-		ContextWindowTokens: cfg.ContextWindowTokens,
+		WorkspaceDir: cfg.WorkspaceDir,
+		LogDir:       cfg.LogDir,
 	}
 }
 
