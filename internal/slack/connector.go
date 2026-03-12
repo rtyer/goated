@@ -13,6 +13,7 @@ import (
 	"github.com/slack-go/slack/socketmode"
 
 	"goated/internal/gateway"
+	"goated/internal/tmux"
 	"goated/internal/util"
 )
 
@@ -155,16 +156,13 @@ func (c *Connector) handleEventsAPI(ctx context.Context, handler gateway.Handler
 		if err := handler.HandleMessage(ctx, msg, c); err != nil {
 			_ = c.SendMessage(ctx, ev.Channel, "Error: "+err.Error())
 		}
-
-		// Clean up thinking if still present (e.g., handler returned without sending)
-		c.clearThinkingIfNeeded(ev.Channel)
 	}
 }
 
 // SendMessage sends a message to the specified Slack channel, converting
 // markdown to Slack's mrkdwn format. Clears any active thinking indicator first.
 func (c *Connector) SendMessage(_ context.Context, channelID, text string) error {
-	c.clearThinkingIfNeeded(channelID)
+	wasThinking := c.clearThinkingIfNeeded(channelID)
 
 	mrkdwn := util.MarkdownToSlackMrkdwn(text)
 
@@ -178,6 +176,12 @@ func (c *Connector) SendMessage(_ context.Context, channelID, text string) error
 		if err != nil {
 			return fmt.Errorf("send slack message: %w", err)
 		}
+	}
+
+	// If we cleared a thinking indicator, check if Claude is still working
+	// and re-post thinking if so.
+	if wasThinking {
+		c.repostThinkingIfBusy(channelID)
 	}
 	return nil
 }
@@ -199,21 +203,41 @@ func (c *Connector) postThinking(channel string) {
 
 // clearThinkingIfNeeded deletes the thinking message if it's still present.
 // It checks the file to avoid deleting a message that the CLI already updated.
-func (c *Connector) clearThinkingIfNeeded(channel string) {
+// Returns true if a thinking indicator was actually cleared.
+func (c *Connector) clearThinkingIfNeeded(channel string) bool {
 	c.mu.Lock()
 	ts := c.thinkingTS
 	c.thinkingTS = ""
 	c.mu.Unlock()
 	if ts == "" {
-		return
+		return false
 	}
 	// If the file is gone, the CLI already handled the message (updated it
 	// with the real response), so don't delete it.
 	if _, err := os.Stat(ThinkingFile); err != nil {
-		return
+		return true // was thinking, CLI handled it
 	}
 	_ = os.Remove(ThinkingFile)
 	_, _, _ = c.api.DeleteMessage(channel, ts)
+	return true
+}
+
+// repostThinkingIfBusy checks if Claude is still working (no ❯ prompt visible)
+// and posts a new thinking indicator if so.
+func (c *Connector) repostThinkingIfBusy(channel string) {
+	ctx := context.Background()
+	out, err := tmux.CaptureVisible(ctx)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n "), "\n")
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-5; i-- {
+		if strings.Contains(lines[i], "❯") {
+			return // Claude is idle
+		}
+	}
+	// Still busy — post new thinking indicator
+	c.postThinking(channel)
 }
 
 // splitMessage breaks a message into chunks that fit Slack's size limit.

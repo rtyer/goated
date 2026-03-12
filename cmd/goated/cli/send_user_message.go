@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"goated/internal/app"
 	slackpkg "goated/internal/slack"
+	"goated/internal/tmux"
 	"goated/internal/util"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -109,6 +111,7 @@ func sendViaSlack(cfg app.Config, channelID, text string) error {
 	mrkdwn := util.MarkdownToSlackMrkdwn(text)
 
 	// If there's a thinking indicator, update it with the real response
+	replacedThinking := false
 	if data, err := os.ReadFile(slackpkg.ThinkingFile); err == nil && len(data) > 0 {
 		_ = os.Remove(slackpkg.ThinkingFile)
 		ts := strings.TrimSpace(string(data))
@@ -118,23 +121,63 @@ func sendViaSlack(cfg app.Config, channelID, text string) error {
 		)
 		if err == nil {
 			fmt.Fprintf(os.Stderr, "Updated thinking message in channel %s (%d chars)\n", channelID, len(text))
-			return nil
+			replacedThinking = true
+		} else {
+			fmt.Fprintf(os.Stderr, "Failed to update thinking message: %v, posting new\n", err)
 		}
-		fmt.Fprintf(os.Stderr, "Failed to update thinking message: %v, posting new\n", err)
 	}
 
-	_, _, err := client.PostMessage(channelID,
-		slackapi.MsgOptionText(mrkdwn, false),
-		slackapi.MsgOptionDisableLinkUnfurl(),
-	)
-	if err != nil {
-		return fmt.Errorf("send slack message: %w", err)
+	if !replacedThinking {
+		_, _, err := client.PostMessage(channelID,
+			slackapi.MsgOptionText(mrkdwn, false),
+			slackapi.MsgOptionDisableLinkUnfurl(),
+		)
+		if err != nil {
+			return fmt.Errorf("send slack message: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Message sent to channel %s (%d chars)\n", channelID, len(text))
 	}
 
-	fmt.Fprintf(os.Stderr, "Message sent to channel %s (%d chars)\n", channelID, len(text))
+	// If we replaced a thinking indicator, check if Claude is still busy.
+	// If so, post a new thinking message so the user knows more is coming.
+	if replacedThinking {
+		if isClaudeBusy() {
+			postSlackThinking(client, channelID)
+		}
+	}
+
 	return nil
 }
 
+
+// isClaudeBusy checks the tmux pane — returns true if Claude is still working
+// (no ❯ prompt in the last few lines).
+func isClaudeBusy() bool {
+	ctx := context.Background()
+	out, err := tmux.CaptureVisible(ctx)
+	if err != nil {
+		return false
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n "), "\n")
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-5; i-- {
+		if strings.Contains(lines[i], "❯") {
+			return false // idle
+		}
+	}
+	return true
+}
+
+// postSlackThinking posts a new "_thinking..._" indicator and writes the
+// ThinkingFile so the next send_user_message call can replace it.
+func postSlackThinking(client *slackapi.Client, channelID string) {
+	_, ts, err := client.PostMessage(channelID,
+		slackapi.MsgOptionText("_thinking..._", false),
+	)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(slackpkg.ThinkingFile, []byte(ts), 0644)
+}
 
 func init() {
 	sendUserMessageCmd.Flags().String("chat", "", "Chat/channel ID to send to (required)")

@@ -23,6 +23,9 @@ workspace/goat
 workspace/goated
 workspace/logs/
 
+# Claude Code local settings
+workspace/.claude
+
 # OS/editor noise
 .DS_Store
 *.swp
