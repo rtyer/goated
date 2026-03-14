@@ -126,16 +126,20 @@ func (s *Service) sendWithRetry(ctx context.Context, msg IncomingMessage, respon
 		}
 
 		// Wait for the runtime to return to an input-ready state, then check for errors.
+		// Timeouts are not user-facing errors — the runtime sends its own responses
+		// via send_user_message, so a slow return to idle is expected for long tasks.
 		state, idleErr := s.Session.WaitForAwaitingInput(ctx, postSendTimeout)
 		if idleErr != nil {
-			if strings.Contains(idleErr.Error(), "timed out waiting") {
-				// Timed out — the runtime is still working, which is fine for long tasks.
-				return nil
-			}
-			return responder.SendMessage(ctx, msg.ChatID, s.friendlyError(idleErr))
+			fmt.Fprintf(os.Stderr, "[%s] WaitForAwaitingInput: %v (suppressed)\n",
+				time.Now().Format(time.RFC3339), idleErr)
+			return nil
 		}
 		if !state.SafeIdle() {
-			return responder.SendMessage(ctx, msg.ChatID, s.runtimeDisplayName()+" needs manual intervention: "+state.Summary)
+			if state.Kind == agent.SessionStateBlockedAuth || state.Kind == agent.SessionStateBlockedIntervene {
+				return responder.SendMessage(ctx, msg.ChatID, s.runtimeDisplayName()+" needs manual intervention: "+state.Summary)
+			}
+			// Unknown/stable states are not errors — runtime may still be working.
+			return nil
 		}
 
 		apiErr := s.Session.DetectRetryableError(ctx)

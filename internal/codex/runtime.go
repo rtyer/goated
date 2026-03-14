@@ -19,7 +19,7 @@ import (
 
 var (
 	statusPercentRe = regexp.MustCompile(`(?i)(?:context window|token usage):\s*(\d+)%\s+used`)
-	readyPromptRe   = regexp.MustCompile(`(?m)^\s*[>›❯]\s*$`)
+	readyPromptRe   = regexp.MustCompile(`(?m)^\s*[>›❯]\s`)
 )
 
 type SessionRuntime struct {

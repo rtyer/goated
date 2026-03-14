@@ -29,7 +29,7 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 		"codex",
 		"exec",
 		"--sandbox", "danger-full-access",
-		"--ask-for-approval", "never",
+		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
 	)
 	cmd.Dir = chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
@@ -66,7 +66,7 @@ func (h *HeadlessRuntime) RunBackground(store *db.Store, req agent.HeadlessReque
 		"codex",
 		"exec",
 		"--sandbox", "danger-full-access",
-		"--ask-for-approval", "never",
+		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
 	)
 	cmd.Dir = chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
