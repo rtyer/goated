@@ -22,12 +22,11 @@ A self-healing bridge between Slack/Telegram and an interactive agent runtime. G
 
 | Binary | Size | Description |
 |--------|------|-------------|
-| `goated` | 11 MB | Control-plane CLI (start, daemon, cron, bootstrap) |
-| `goated_daemon` | 11 MB | Background daemon (same code, daemon entrypoint) |
+| `goated` | 11 MB | Control-plane CLI + daemon (`daemon run`, `start`, cron, bootstrap) |
 | `goat` | 11 MB | Agent-facing CLI (send_user_message, creds, cron, spawn-subagent) |
 | `goated.db` | 64 KB | bbolt embedded database (crons, subagent runs, metadata) |
 
-All three binaries are statically-compiled Go with no runtime dependencies.
+Both binaries are statically-compiled Go with no runtime dependencies.
 
 **Memory at runtime:** the daemon uses ~14 MB RSS. Subagents are separate runtime CLI processes. The goat CLI is exec'd per-call and exits immediately, so it adds no persistent memory cost.
 
@@ -82,13 +81,12 @@ goated/
 ├── goated.db                   # bbolt database (gitignored)
 │
 ├── cmd/
-│   ├── daemon/main.go          # Daemon binary (builds ./goated_daemon)
 │   └── goated/                 # Shared CLI (builds ./goated and ./workspace/goat)
 │       └── cli/
 │           ├── bootstrap.go    # Interactive setup wizard
 │           ├── creds.go        # Credential management
 │           ├── cron.go         # Cron CRUD
-│           ├── daemon.go       # daemon start/stop/restart/status
+│           ├── daemon.go       # daemon run/start/stop/restart/status
 │           ├── gateway.go      # Run gateway standalone
 │           ├── send_user_message.go  # Agent → Telegram message push
 │           ├── session.go      # Active runtime session management (status/restart/send)
@@ -205,7 +203,7 @@ cd goated
 bash build.sh
 ```
 
-This builds three binaries: `./goated`, `./goated_daemon`, and `./workspace/goat`.
+This builds two binaries: `./goated` and `./workspace/goat`.
 
 ### Configure
 
@@ -248,7 +246,7 @@ All env vars:
 ./goated start
 
 # Background daemon (prod)
-./goated_daemon
+./goated daemon run
 ```
 
 To find your chat ID, message the bot and send `/chatid`.

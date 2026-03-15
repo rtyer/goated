@@ -6,7 +6,7 @@
 .                        # Go module root
 ├── cmd/
 │   ├── goated/          # Agent CLI (./workspace/goat)
-│   └── daemon/          # Gateway daemon (./goated_daemon)
+│   └── goated/          # CLI + daemon (./goated, ./workspace/goat)
 ├── internal/
 │   ├── app/             # Config (env vars, .env loading)
 │   ├── agent/           # Provider-neutral runtime contracts
@@ -35,11 +35,10 @@
 
 | Binary | Source | Output path | Purpose |
 |--------|--------|-------------|---------|
-| `goated` | `.` (main.go) | `./goated` | Control CLI (start, daemon, cron, bootstrap) |
-| `goated_daemon` | `./cmd/daemon` | `./goated_daemon` | Gateway daemon (Slack/Telegram <-> active runtime) |
+| `goated` | `.` (main.go) | `./goated` | Control CLI + daemon (`daemon run`, `start`, `cron`, `bootstrap`) |
 | `goat` | `./cmd/goated` | `./workspace/goat` | Agent CLI (used by the runtime inside workspace) |
 
-All three are statically-compiled Go. The daemon uses ~14 MB RSS. The `goat` CLI is exec'd per-call and exits immediately.
+Both are statically-compiled Go. The daemon uses ~14 MB RSS. The `goat` CLI is exec'd per-call and exits immediately.
 
 ## How it works
 

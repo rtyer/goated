@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# watchdog.sh — ensures goated_daemon is always running.
-# Add to crontab:  */2 * * * * /home/dorkitude/a/dev/goated/scripts/watchdog.sh
+# watchdog.sh — ensures the goated daemon is always running.
+# Add to crontab:  */2 * * * * /path/to/goated/scripts/watchdog.sh
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="$REPO_DIR/logs/goated_daemon.pid"
-DAEMON_BIN="$REPO_DIR/goated_daemon"
+GOATED_BIN="$REPO_DIR/goated"
 LOG_FILE="$REPO_DIR/logs/goated_daemon.log"
 WATCHDOG_LOG="$REPO_DIR/logs/watchdog.log"
 
@@ -13,9 +13,9 @@ log() {
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >> "$WATCHDOG_LOG"
 }
 
-# Check if daemon binary exists
-if [ ! -x "$DAEMON_BIN" ]; then
-    log "ERROR: daemon binary not found at $DAEMON_BIN"
+# Check if goated binary exists
+if [ ! -x "$GOATED_BIN" ]; then
+    log "ERROR: goated binary not found at $GOATED_BIN"
     exit 1
 fi
 
@@ -35,5 +35,5 @@ fi
 # Daemon is not running — start it
 log "Daemon not running, starting it"
 cd "$REPO_DIR"
-output=$($DAEMON_BIN 2>&1) || true
+output=$($GOATED_BIN daemon run 2>&1) || true
 log "Started daemon: $output"

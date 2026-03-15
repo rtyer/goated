@@ -103,7 +103,7 @@ var bootstrapCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Println("Bootstrap complete. Next steps:")
 		fmt.Println("  1. Build:       ./build.sh")
-		fmt.Println("  2. Start:       ./goated_daemon")
+		fmt.Println("  2. Start:       ./goated daemon run")
 		fmt.Println("  3. Watchdog:    Install the daemon watchdog cron (checks every 2 min):")
 		fmt.Println()
 		// Resolve repo root from the running executable

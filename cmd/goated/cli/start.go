@@ -21,7 +21,7 @@ import (
 
 var startCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start the gateway and cron scheduler",
+	Short: "Start the gateway and cron scheduler (foreground, no PID file)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := app.LoadConfig()
 
@@ -136,39 +136,6 @@ var startCmd = &cobra.Command{
 		fmt.Fprintln(os.Stderr, "All messages flushed.")
 		return nil
 	},
-}
-
-func runCronTicker(ctx context.Context, runner *cronpkg.Runner) {
-	// Align to the next minute boundary
-	now := time.Now()
-	next := now.Truncate(time.Minute).Add(time.Minute)
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(time.Until(next)):
-	}
-
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-
-	// Run immediately at the first aligned minute
-	runCronOnce(ctx, runner)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			runCronOnce(ctx, runner)
-		}
-	}
-}
-
-func runCronOnce(ctx context.Context, runner *cronpkg.Runner) {
-	now := time.Now()
-	if err := runner.Run(ctx, now); err != nil {
-		fmt.Fprintf(os.Stderr, "cron error: %v\n", err)
-	}
 }
 
 func init() {

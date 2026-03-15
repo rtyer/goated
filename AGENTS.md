@@ -14,12 +14,11 @@ scripts/setup_machine.sh doctor
 **Always use `build.sh`** — never `go build` directly.
 
 ```bash
-./build.sh              # builds all three binaries
+./build.sh              # builds both binaries
 ```
 
-Three binaries are produced:
-- `./goated` — control CLI
-- `./goated_daemon` — gateway daemon
+Two binaries are produced:
+- `./goated` — control CLI + daemon
 - `./workspace/goat` — agent CLI (used by Claude inside workspace)
 
 ## Running the daemon
@@ -30,7 +29,7 @@ Three binaries are produced:
 
 Or if already built:
 ```bash
-./goated_daemon                 # self-daemonizes, logs to logs/goated_daemon.log
+./goated daemon run             # self-daemonizes, logs to logs/goated_daemon.log
 ```
 
 The daemon self-backgrounds. No `nohup &` needed.
