@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/goated_logo_small.png" alt="Goated" width="180" />
+</p>
+
 # goated
 
 A self-healing bridge between Slack/Telegram and an interactive agent runtime. Goated supports Claude Code and Codex, with the same chat surface, cron jobs, subagents, credential management, and daemon lifecycle.
