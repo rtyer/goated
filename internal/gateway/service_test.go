@@ -13,7 +13,7 @@ import (
 type stubRuntime struct{}
 
 func (s stubRuntime) Descriptor() agent.RuntimeDescriptor {
-	return agent.RuntimeDescriptor{DisplayName: "Claude Code"}
+	return agent.RuntimeDescriptor{DisplayName: "Claude Code TUI"}
 }
 func (s stubRuntime) EnsureSession(context.Context) error                { return nil }
 func (s stubRuntime) StopSession(context.Context) error                  { return nil }
@@ -56,7 +56,7 @@ func TestFriendlyError_Canceled(t *testing.T) {
 func TestFriendlyError_DeadlineExceeded(t *testing.T) {
 	svc := newTestService()
 	got := svc.friendlyError(context.DeadlineExceeded)
-	want := "Claude Code took too long to respond (timed out). Try again or simplify your request."
+	want := "Claude Code TUI took too long to respond (timed out). Try again or simplify your request."
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -66,7 +66,7 @@ func TestFriendlyError_TimedOut(t *testing.T) {
 	svc := newTestService()
 	err := errors.New("timed out waiting for claude response")
 	got := svc.friendlyError(err)
-	want := "Claude Code didn't finish in time. Try again or use /clear to start a fresh session."
+	want := "Claude Code TUI didn't finish in time. Try again or use /clear to start a fresh session."
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -76,7 +76,7 @@ func TestFriendlyError_SessionReadiness(t *testing.T) {
 	svc := newTestService()
 	err := errors.New("timed out waiting for Claude session readiness")
 	got := svc.friendlyError(err)
-	want := "Claude Code session failed to start. Try /clear to reset, or check that the daemon is healthy."
+	want := "Claude Code TUI session failed to start. Try /clear to reset, or check that the daemon is healthy."
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -86,7 +86,7 @@ func TestFriendlyError_PaneToChange(t *testing.T) {
 	svc := newTestService()
 	err := errors.New("waiting for pane to change but it stalled")
 	got := svc.friendlyError(err)
-	want := "Failed to send your message to Claude Code. The session may be stuck — try /clear."
+	want := "Failed to send your message to Claude Code TUI. The session may be stuck — try /clear."
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -96,7 +96,7 @@ func TestFriendlyError_UnhealthyAfter(t *testing.T) {
 	svc := newTestService()
 	err := errors.New("claude code session unhealthy after 5 restart attempts")
 	got := svc.friendlyError(err)
-	want := "Claude Code session is down and couldn't be auto-restarted. The admin has been notified."
+	want := "Claude Code TUI session is down and couldn't be auto-restarted. The admin has been notified."
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -106,7 +106,7 @@ func TestFriendlyError_GenericError(t *testing.T) {
 	svc := newTestService()
 	err := errors.New("something unexpected")
 	got := svc.friendlyError(err)
-	want := "Something went wrong talking to Claude Code: something unexpected"
+	want := "Something went wrong talking to Claude Code TUI: something unexpected"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

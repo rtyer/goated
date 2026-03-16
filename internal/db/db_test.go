@@ -209,7 +209,7 @@ func TestGetCronNotFound(t *testing.T) {
 func TestSubagentRunLifecycle(t *testing.T) {
 	s := newTestStore(t)
 
-	id, err := s.RecordSubagentStart(1234, "cron", 1, "chat1", "do work", "/tmp/log")
+	id, err := s.RecordSubagentStart(1234, "cron", 1, "chat1", "do work", "/tmp/log", ExecutionRuntime{})
 	if err != nil {
 		t.Fatalf("RecordSubagentStart: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestCronJobRunning(t *testing.T) {
 		t.Fatal("expected false for no runs")
 	}
 
-	id, _ := s.RecordSubagentStart(100, "cron", 1, "chat1", "test", "/tmp/log")
+	id, _ := s.RecordSubagentStart(100, "cron", 1, "chat1", "test", "/tmp/log", ExecutionRuntime{})
 	if !s.CronJobRunning(1) {
 		t.Fatal("expected true while running")
 	}
@@ -265,19 +265,19 @@ func TestRecordCronRunDedup(t *testing.T) {
 	s := newTestStore(t)
 
 	// First record
-	err := s.RecordCronRun(1, "2025-01-01T00:00", "started", "", "")
+	err := s.RecordCronRun(1, "2025-01-01T00:00", "started", "", "", ExecutionRuntime{})
 	if err != nil {
 		t.Fatalf("first RecordCronRun: %v", err)
 	}
 
 	// Same cron+minute should update, not create duplicate
-	err = s.RecordCronRun(1, "2025-01-01T00:00", "ok", "done", "/log")
+	err = s.RecordCronRun(1, "2025-01-01T00:00", "ok", "done", "/log", ExecutionRuntime{})
 	if err != nil {
 		t.Fatalf("second RecordCronRun: %v", err)
 	}
 
 	// Different minute should be a separate entry
-	err = s.RecordCronRun(1, "2025-01-01T00:01", "started", "", "")
+	err = s.RecordCronRun(1, "2025-01-01T00:01", "started", "", "", ExecutionRuntime{})
 	if err != nil {
 		t.Fatalf("third RecordCronRun: %v", err)
 	}
