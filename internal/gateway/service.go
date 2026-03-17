@@ -176,9 +176,29 @@ func (s *Service) sendWithRetry(ctx context.Context, msg IncomingMessage, respon
 	for attempt := 0; attempt <= maxSendRetries; attempt++ {
 		s.logStatus(requestID, msglog.EntryUserMessage, msglog.StatusSentToAgent)
 
+		// If the runtime is already processing a message, notify the user
+		// that their message is queued. SendUserPrompt will block until
+		// the previous process finishes.
+		// Skip the notification if this is the first user message in this
+		// daemon session (msgCount == 1) — the contention is likely from
+		// stuck-message replay, not a previous user interaction.
+		queued := false
+		currentCount := atomic.LoadUint64(&s.msgCount)
+		if currentCount > 1 {
+			if state, err := s.Session.GetSessionState(ctx); err == nil && state.Kind == agent.SessionStateGenerating {
+				queued = true
+				_ = responder.SendMessage(ctx, msg.ChatID,
+					"[System] I've queued your message to read after I finish the previous work....")
+			}
+		}
+
 		if err := s.Session.SendUserPrompt(ctx, msg.Channel, msg.ChatID, msg.Text, msgAttachments(msg), msg.MessageID, msg.ThreadID); err != nil {
 			s.logEvent(requestID, msglog.EventData{Name: "send_failed", Detail: err.Error()})
 			return responder.SendMessage(ctx, msg.ChatID, s.friendlyError(err))
+		}
+
+		if queued {
+			_ = responder.SendMessage(ctx, msg.ChatID, "[System] Now reading your queued message.")
 		}
 
 		// Wait for the runtime to return to an input-ready state, then check for errors.

@@ -14,6 +14,10 @@ import (
 	"goated/internal/msglog"
 )
 
+// postSendWaitTimeout is how long SendUserPrompt will wait for a previous
+// claude process to finish before giving up.
+const postSendWaitTimeout = 6 * time.Minute
+
 // SessionRuntime implements agent.SessionRuntime using `claude -p --resume`.
 // No persistent process or tmux session — each user message spawns a short-lived
 // `claude -p` process that reconnects via --resume <session_id>.
@@ -218,11 +222,30 @@ func (r *SessionRuntime) SendUserPrompt(ctx context.Context, channel, chatID, us
 	var stderrBuf strings.Builder
 	cmd.Stderr = &stderrWriter{file: outFile, buf: &stderrBuf, redactor: r.redactor}
 
+	// Serialize access: if a process is already running, wait for it to finish.
+	// Loop handles the case where multiple goroutines are waiting — after the
+	// current process exits, only the first to re-acquire the lock proceeds;
+	// the rest loop and wait on the next process's done channel.
 	r.mu.Lock()
-	if r.proc != nil {
+	for r.proc != nil {
+		done := r.done
 		r.mu.Unlock()
-		outFile.Close()
-		return fmt.Errorf("a claude process is already running")
+
+		fmt.Fprintf(os.Stderr, "[%s] queued: waiting for in-flight claude process to finish\n",
+			time.Now().Format(time.RFC3339))
+
+		select {
+		case <-done:
+			// Previous process finished — re-check under lock
+		case <-time.After(postSendWaitTimeout):
+			outFile.Close()
+			return fmt.Errorf("timed out waiting for previous claude process to finish")
+		case <-ctx.Done():
+			outFile.Close()
+			return ctx.Err()
+		}
+
+		r.mu.Lock()
 	}
 
 	if err := cmd.Start(); err != nil {
