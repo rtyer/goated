@@ -109,6 +109,7 @@ Settings live in `goated.json` (Viper-managed). Secrets live in `workspace/creds
 | `telegram.mode` | `polling` | `polling` or `webhook` |
 | `telegram.webhook_addr` | `:8080` | Listen address for webhook mode |
 | `telegram.webhook_path` | `/telegram/webhook` | Webhook endpoint path |
+| `slack.channel_id` | `""` | Monitored Slack DM/channel ID |
 | `slack.attachments_root` | `workspace/tmp/slack/attachments` | Slack attachment download dir |
 | `slack.attachment_max_bytes` | `26214400` | Max single attachment size |
 | `slack.attachment_max_total_bytes` | `263192576` | Max total attachment size |
@@ -122,7 +123,6 @@ Settings live in `goated.json` (Viper-managed). Secrets live in `workspace/creds
 | `GOAT_TELEGRAM_WEBHOOK_URL.txt` | `GOAT_TELEGRAM_WEBHOOK_URL` | Public URL for webhook mode |
 | `GOAT_SLACK_BOT_TOKEN.txt` | `GOAT_SLACK_BOT_TOKEN` | Bot User OAuth Token (xoxb-...) |
 | `GOAT_SLACK_APP_TOKEN.txt` | `GOAT_SLACK_APP_TOKEN` | App-Level Token (xapp-...) |
-| `GOAT_SLACK_CHANNEL_ID.txt` | `GOAT_SLACK_CHANNEL_ID` | Monitored Slack DM channel |
 | `GOAT_ADMIN_CHAT_ID.txt` | `GOAT_ADMIN_CHAT_ID` | Chat ID for admin alerts |
 
 Env vars always win over creds files. Use `goated creds set KEY VALUE` to manage secrets.

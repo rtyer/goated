@@ -243,6 +243,7 @@ Settings (`goated.json`):
 | `telegram.mode`                  | `polling`             | `polling` or `webhook`                            |
 | `telegram.webhook_addr`          | `:8080`               | Listen address for webhook mode                   |
 | `telegram.webhook_path`          | `/telegram/webhook`   | Webhook endpoint path                             |
+| `slack.channel_id`               | `""`                  | Monitored Slack DM/channel ID                     |
 
 Secrets (`workspace/creds/*.txt`, env vars override):
 
@@ -252,7 +253,6 @@ Secrets (`workspace/creds/*.txt`, env vars override):
 | `GOAT_ADMIN_CHAT_ID`            | Chat ID for admin alerts when auto-recovery fails |
 | `GOAT_SLACK_BOT_TOKEN`          | Bot User OAuth Token (xoxb-...)                   |
 | `GOAT_SLACK_APP_TOKEN`          | App-Level Token (xapp-...) for Socket Mode        |
-| `GOAT_SLACK_CHANNEL_ID`         | Monitored Slack DM channel                        |
 
 ### Start
 

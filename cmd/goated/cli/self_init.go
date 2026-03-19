@@ -48,6 +48,7 @@ func ensureSeededSelfRepo(workspaceDir string, out io.Writer) error {
 	}
 	fmt.Fprintln(out, "Template copy complete.")
 
+	fmt.Fprintln(out, "Re-initializing git after the copy so workspace/self becomes its own agent-specific repo, not a clone of template git metadata.")
 	fmt.Fprintf(out, "Initializing a git repo in %s...\n", selfDir)
 	gitInit := exec.Command("git", "init")
 	gitInit.Dir = selfDir
@@ -96,6 +97,12 @@ func copyDir(srcDir, dstDir string) error {
 		relPath, err := filepath.Rel(srcDir, srcPath)
 		if err != nil {
 			return err
+		}
+		if relPath == ".git" || strings.HasPrefix(relPath, ".git"+string(filepath.Separator)) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		dstPath := filepath.Join(dstDir, relPath)
 

@@ -70,6 +70,9 @@ var migrateConfigCmd = &cobra.Command{
 		if v := env["GOAT_SLACK_ATTACHMENTS_ROOT"]; v != "" {
 			slack["attachments_root"] = v
 		}
+		if v := env["GOAT_SLACK_CHANNEL_ID"]; v != "" {
+			slack["channel_id"] = v
+		}
 		if v := env["GOAT_SLACK_ATTACHMENT_MAX_BYTES"]; v != "" {
 			slack["attachment_max_bytes"] = v
 		}
@@ -103,7 +106,6 @@ var migrateConfigCmd = &cobra.Command{
 			"GOAT_TELEGRAM_WEBHOOK_URL":  env["GOAT_TELEGRAM_WEBHOOK_URL"],
 			"GOAT_SLACK_BOT_TOKEN":       env["GOAT_SLACK_BOT_TOKEN"],
 			"GOAT_SLACK_APP_TOKEN":       env["GOAT_SLACK_APP_TOKEN"],
-			"GOAT_SLACK_CHANNEL_ID":      env["GOAT_SLACK_CHANNEL_ID"],
 			"GOAT_ADMIN_CHAT_ID":         env["GOAT_ADMIN_CHAT_ID"],
 		}
 

@@ -282,8 +282,14 @@ func writeChannelConfig(ch *db.Channel) error {
 		existing["telegram"] = telegram
 
 	case "slack":
-		// Slack settings section preserved (attachment limits etc.)
-		// Secrets go to creds files, not config
+		slack := make(map[string]any)
+		if s, ok := existing["slack"].(map[string]any); ok {
+			slack = s
+		}
+		if v := ch.Config["channel_id"]; v != "" {
+			slack["channel_id"] = v
+		}
+		existing["slack"] = slack
 	}
 
 	return app.WriteConfigJSON(configPath, existing)
@@ -314,10 +320,8 @@ func writeChannelCreds(credsDir string, ch *db.Channel) error {
 				return err
 			}
 		}
-		if v := ch.Config["channel_id"]; v != "" {
-			if err := app.WriteCred(credsDir, "GOAT_SLACK_CHANNEL_ID", v); err != nil {
-				return err
-			}
+		if err := app.RemoveCred(credsDir, "GOAT_SLACK_CHANNEL_ID"); err != nil {
+			return err
 		}
 	}
 	return nil

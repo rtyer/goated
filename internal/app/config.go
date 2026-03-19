@@ -97,6 +97,7 @@ func LoadConfig() Config {
 	v.SetDefault("telegram.webhook_addr", ":8080")
 	v.SetDefault("telegram.webhook_path", "/telegram/webhook")
 	v.SetDefault("slack.attachments_root", "")
+	v.SetDefault("slack.channel_id", "")
 	v.SetDefault("slack.attachment_max_bytes", int64(25*1024*1024))
 	v.SetDefault("slack.attachment_max_total_bytes", int64(251*1024*1024))
 	v.SetDefault("slack.attachment_max_parallel", 3)
@@ -113,6 +114,7 @@ func LoadConfig() Config {
 	v.BindEnv("telegram.webhook_addr", "GOAT_TELEGRAM_WEBHOOK_LISTEN_ADDR")
 	v.BindEnv("telegram.webhook_path", "GOAT_TELEGRAM_WEBHOOK_PATH")
 	v.BindEnv("slack.attachments_root", "GOAT_SLACK_ATTACHMENTS_ROOT")
+	v.BindEnv("slack.channel_id", "GOAT_SLACK_CHANNEL_ID")
 	v.BindEnv("slack.attachment_max_bytes", "GOAT_SLACK_ATTACHMENT_MAX_BYTES")
 	v.BindEnv("slack.attachment_max_total_bytes", "GOAT_SLACK_ATTACHMENT_MAX_TOTAL_BYTES")
 	v.BindEnv("slack.attachment_max_parallel", "GOAT_SLACK_ATTACHMENT_MAX_PARALLEL")
@@ -181,6 +183,18 @@ func LoadConfig() Config {
 
 	// Resolve creds directory for secrets
 	credsDir := filepath.Join(workspace, "creds")
+	slackChannelID := v.GetString("slack.channel_id")
+	if slackChannelID == "" {
+		legacyChannelID := loadCredFile(credsDir, "GOAT_SLACK_CHANNEL_ID")
+		if legacyChannelID != "" {
+			slackChannelID = legacyChannelID
+			if used := v.ConfigFileUsed(); used != "" {
+				if err := migrateLegacySlackChannelID(used, legacyChannelID, credsDir); err != nil {
+					fmt.Fprintf(os.Stderr, "WARNING: migrate legacy GOAT_SLACK_CHANNEL_ID: %v\n", err)
+				}
+			}
+		}
+	}
 
 	return Config{
 		WorkspaceDir:                 workspace,
@@ -196,7 +210,7 @@ func LoadConfig() Config {
 		TelegramWebhookPath:          v.GetString("telegram.webhook_path"),
 		SlackBotToken:                loadCred(credsDir, "GOAT_SLACK_BOT_TOKEN"),
 		SlackAppToken:                loadCred(credsDir, "GOAT_SLACK_APP_TOKEN"),
-		SlackChannelID:               loadCred(credsDir, "GOAT_SLACK_CHANNEL_ID"),
+		SlackChannelID:               slackChannelID,
 		SlackAttachmentsRoot:         slackAttRoot,
 		SlackAttachmentMaxBytes:      v.GetInt64("slack.attachment_max_bytes"),
 		SlackAttachmentMaxTotalBytes: v.GetInt64("slack.attachment_max_total_bytes"),
@@ -212,12 +226,25 @@ func loadCred(credsDir, key string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+	return loadCredFile(credsDir, key)
+}
+
+func loadCredFile(credsDir, key string) string {
 	path := filepath.Join(credsDir, key+".txt")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// RemoveCred removes workspace/creds/KEY.txt if it exists.
+func RemoveCred(credsDir, key string) error {
+	path := filepath.Join(credsDir, key+".txt")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // ReadConfigJSON reads a goated.json config file into a generic map.
@@ -336,6 +363,9 @@ func autoMigrateEnv(envPath string) error {
 	if v := env["GOAT_SLACK_ATTACHMENTS_ROOT"]; v != "" {
 		slack["attachments_root"] = v
 	}
+	if v := env["GOAT_SLACK_CHANNEL_ID"]; v != "" {
+		slack["channel_id"] = v
+	}
 	setSlackInt("attachment_max_bytes", "GOAT_SLACK_ATTACHMENT_MAX_BYTES")
 	setSlackInt("attachment_max_total_bytes", "GOAT_SLACK_ATTACHMENT_MAX_TOTAL_BYTES")
 	setSlackInt("attachment_max_parallel", "GOAT_SLACK_ATTACHMENT_MAX_PARALLEL")
@@ -366,7 +396,6 @@ func autoMigrateEnv(envPath string) error {
 		{"GOAT_TELEGRAM_WEBHOOK_URL"},
 		{"GOAT_SLACK_BOT_TOKEN"},
 		{"GOAT_SLACK_APP_TOKEN"},
-		{"GOAT_SLACK_CHANNEL_ID"},
 		{"GOAT_ADMIN_CHAT_ID"},
 	}
 	for _, s := range secrets {
@@ -417,6 +446,30 @@ func parseEnvFileForMigration(path string) map[string]string {
 		m[key] = value
 	}
 	return m
+}
+
+func migrateLegacySlackChannelID(configPath, channelID, credsDir string) error {
+	cfg, err := ReadConfigJSON(configPath)
+	if err != nil {
+		return err
+	}
+
+	slack, _ := cfg["slack"].(map[string]any)
+	if slack == nil {
+		slack = make(map[string]any)
+	}
+	if existing, _ := slack["channel_id"].(string); existing == "" {
+		slack["channel_id"] = channelID
+	}
+	cfg["slack"] = slack
+
+	if err := WriteConfigJSON(configPath, cfg); err != nil {
+		return err
+	}
+	if err := RemoveCred(credsDir, "GOAT_SLACK_CHANNEL_ID"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func defaultBaseDir(cwd, exeDir string) string {

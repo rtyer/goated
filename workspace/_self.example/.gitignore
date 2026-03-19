@@ -1,3 +1,8 @@
 logs/
 tools/toolbox
+tools/toolbox.exe
 tools/notesmd
+tools/notesmd.exe
+tools/notesmd-cli/notesmd-cli
+tools/notesmd-cli/*.exe
+tools/notesmd-cli/bin/
