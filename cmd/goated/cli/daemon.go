@@ -365,7 +365,7 @@ func handleDaemonSocketConn(ctx context.Context, conn net.Conn, responder gatewa
 }
 
 func ensureSelfRepo(workspaceDir string) error {
-	return ensureSeededSelfRepo(workspaceDir, os.Stderr)
+	return ensureSelfRepoExists(workspaceDir)
 }
 
 var daemonRestartCmd = &cobra.Command{

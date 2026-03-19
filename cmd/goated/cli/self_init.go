@@ -10,6 +10,14 @@ import (
 )
 
 func ensureSeededSelfRepo(workspaceDir string, out io.Writer) error {
+	return ensureSeededSelfRepoWithOptions(workspaceDir, out, true)
+}
+
+func ensureSelfRepoExists(workspaceDir string) error {
+	return ensureSeededSelfRepoWithOptions(workspaceDir, io.Discard, false)
+}
+
+func ensureSeededSelfRepoWithOptions(workspaceDir string, out io.Writer, announceExisting bool) error {
 	if workspaceDir == "" {
 		return fmt.Errorf("workspace directory is not configured")
 	}
@@ -21,8 +29,10 @@ func ensureSeededSelfRepo(workspaceDir string, out io.Writer) error {
 		if !info.IsDir() {
 			return fmt.Errorf("workspace self path %s is not a directory", selfDir)
 		}
-		fmt.Fprintf(out, "Self repo already exists at %s\n", selfDir)
-		fmt.Fprintln(out, "Skipping template copy because bootstrap should never overwrite an existing private self repo.")
+		if announceExisting {
+			fmt.Fprintf(out, "Self repo already exists at %s\n", selfDir)
+			fmt.Fprintln(out, "Skipping template copy because bootstrap should never overwrite an existing private self repo.")
+		}
 		return nil
 	case !os.IsNotExist(err):
 		return fmt.Errorf("stat %s: %w", selfDir, err)

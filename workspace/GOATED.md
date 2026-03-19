@@ -34,8 +34,8 @@ Responding to the user:
 
 Daemon management:
 - Never restart the Goated daemon without explicit user approval.
-- If a restart is needed, ask first and use `./goated daemon restart --reason "..."`
-  from the repo root.
+- If a restart is needed, ask first and use `./goat daemon restart --reason "..."`
+  from the workspace directory.
 
 Instruction precedence:
 - This runtime contract governs message handling and reply behavior for Goated.

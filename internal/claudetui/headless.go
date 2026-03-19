@@ -7,6 +7,7 @@ import (
 
 	"goated/internal/agent"
 	"goated/internal/db"
+	"goated/internal/sessionname"
 	"goated/internal/subagent"
 )
 
@@ -23,8 +24,9 @@ func (h *HeadlessRuntime) Descriptor() agent.RuntimeDescriptor {
 }
 
 func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agent.HeadlessRequest) (agent.HeadlessResult, error) {
+	workspaceDir := chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
 	opts := subagent.RunOpts{
-		WorkspaceDir: chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir),
+		WorkspaceDir: workspaceDir,
 		Prompt:       req.Prompt,
 		LogPath:      req.LogPath,
 		Source:       req.Source,
@@ -32,7 +34,7 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 		ChatID:       req.ChatID,
 		Silent:       req.Silent,
 		LogCaller:    req.LogCaller,
-		SessionName:  "goat_claude_tui_main",
+		SessionName:  sessionname.ClaudeTUI(workspaceDir),
 		Runtime: db.ExecutionRuntime{
 			Provider: "claude_tui",
 			Mode:     "headless_exec",
@@ -55,8 +57,9 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 }
 
 func (h *HeadlessRuntime) RunBackground(store *db.Store, req agent.HeadlessRequest) (agent.HeadlessResult, error) {
+	workspaceDir := chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
 	opts := subagent.RunOpts{
-		WorkspaceDir: chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir),
+		WorkspaceDir: workspaceDir,
 		Prompt:       req.Prompt,
 		LogPath:      req.LogPath,
 		Source:       req.Source,
@@ -64,7 +67,7 @@ func (h *HeadlessRuntime) RunBackground(store *db.Store, req agent.HeadlessReque
 		ChatID:       req.ChatID,
 		Silent:       req.Silent,
 		LogCaller:    req.LogCaller,
-		SessionName:  "goat_claude_tui_main",
+		SessionName:  sessionname.ClaudeTUI(workspaceDir),
 		Runtime: db.ExecutionRuntime{
 			Provider: "claude_tui",
 			Mode:     "headless_exec",

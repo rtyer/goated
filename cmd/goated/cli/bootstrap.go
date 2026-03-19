@@ -128,10 +128,23 @@ var bootstrapCmd = &cobra.Command{
 }
 
 func runBootstrapPostSetup(repoRoot string) error {
+	cfg := app.LoadConfig()
+
 	fmt.Println("Running post-bootstrap setup automatically so this workspace is immediately usable.")
 
 	fmt.Println()
-	fmt.Println("[1/3] Building binaries with ./build.sh")
+	fmt.Println("[1/4] Installing the managed Go toolchain with scripts/setup_machine.sh install-go")
+	fmt.Println("Reason: bootstrap and self repo setup both build Go binaries, so the expected Go version needs to exist before any build step runs.")
+	setupCmd := exec.Command(filepath.Join(repoRoot, "scripts", "setup_machine.sh"), "install-go")
+	setupCmd.Dir = repoRoot
+	setupCmd.Stdout = os.Stdout
+	setupCmd.Stderr = os.Stderr
+	if err := setupCmd.Run(); err != nil {
+		return fmt.Errorf("run setup_machine.sh install-go: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("[2/4] Building binaries with ./build.sh")
 	fmt.Println("Reason: bootstrap writes config and seeds self/, but the workspace is not actually runnable until goated and workspace/goat are built.")
 	buildCmd := exec.Command(filepath.Join(repoRoot, "build.sh"))
 	buildCmd.Dir = repoRoot
@@ -142,7 +155,19 @@ func runBootstrapPostSetup(repoRoot string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("[2/3] Starting the goated daemon")
+	fmt.Println("[3/5] Stopping any existing goated daemon")
+	fmt.Println("Reason: bootstrap should leave the freshly built daemon running, not fail because an older daemon instance is still holding the pid file.")
+	pidPath := filepath.Join(cfg.LogDir, "goated_daemon.pid")
+	if oldPID, err := stopDaemon(pidPath); err != nil {
+		return fmt.Errorf("stop existing daemon: %w", err)
+	} else if oldPID > 0 {
+		fmt.Printf("Stopped existing daemon (pid=%d)\n", oldPID)
+	} else {
+		fmt.Println("No running daemon found.")
+	}
+
+	fmt.Println()
+	fmt.Println("[4/5] Starting the goated daemon")
 	fmt.Println("Reason: a successful bootstrap should leave the gateway running instead of requiring a separate manual start step.")
 	goatedBin := filepath.Join(repoRoot, "goated")
 	startCmd := exec.Command(goatedBin, "daemon", "run")
@@ -154,7 +179,7 @@ func runBootstrapPostSetup(repoRoot string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("[3/3] Installing the watchdog cron")
+	fmt.Println("[5/5] Installing the watchdog cron")
 	fmt.Println("Reason: the watchdog restarts the daemon if it dies, so a fresh bootstrap should also make the service resilient.")
 	if err := installWatchdogCron(repoRoot); err != nil {
 		return err

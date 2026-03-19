@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"goated/internal/agent"
+	"goated/internal/sessionname"
 	"goated/internal/tmux"
 )
 
@@ -25,7 +26,7 @@ func NewSessionRuntime(workspaceDir, logDir string) *TmuxBridge {
 	return &TmuxBridge{
 		WorkspaceDir: workspaceDir,
 		LogDir:       logDir,
-		SessionName:  "goat_claude_tui_main",
+		SessionName:  sessionname.ClaudeTUI(workspaceDir),
 	}
 }
 
@@ -352,7 +353,7 @@ func (b *TmuxBridge) sessionName() string {
 	if b.SessionName != "" {
 		return b.SessionName
 	}
-	return "goat_claude_tui_main"
+	return sessionname.ClaudeTUI(b.WorkspaceDir)
 }
 
 // SendRaw pastes arbitrary text into the tmux session and presses Enter.
@@ -387,6 +388,7 @@ func waitForClaudeReady(ctx context.Context, timeout time.Duration) error {
 
 func waitForClaudeReadyFor(ctx context.Context, session string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	acceptedWorkspaceTrust := false
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -395,6 +397,14 @@ func waitForClaudeReadyFor(ctx context.Context, session string, timeout time.Dur
 		}
 		out, err := tmux.CapturePaneFor(ctx, session)
 		if err == nil {
+			if !acceptedWorkspaceTrust && isWorkspaceTrustPrompt(out) {
+				if err := tmux.Run(ctx, "send-keys", "-t", session+":0.0", "Enter"); err != nil {
+					return fmt.Errorf("confirm Claude workspace trust prompt: %w", err)
+				}
+				acceptedWorkspaceTrust = true
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
 			if strings.Contains(out, "Claude Code") && strings.Contains(out, "❯") {
 				return nil
 			}
@@ -402,6 +412,12 @@ func waitForClaudeReadyFor(ctx context.Context, session string, timeout time.Dur
 		time.Sleep(350 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for Claude session readiness")
+}
+
+func isWorkspaceTrustPrompt(out string) bool {
+	return strings.Contains(out, "Accessing workspace:") &&
+		strings.Contains(out, "Yes, I trust this folder") &&
+		strings.Contains(out, "Enter to confirm")
 }
 
 func (b *TmuxBridge) StopSession(ctx context.Context) error {

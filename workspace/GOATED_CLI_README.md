@@ -64,17 +64,13 @@ Use Goated cron for all recurring work. Do **not** use Codex or Claude Code buil
 
 - Run headless helper: `./goat spawn-subagent --prompt "Run a headless task"`
 
-## Control-plane CLI
-
-The control-plane CLI is `./goated` (from the repo root).
-
-### Session management
+## Session management
 
 ```sh
-./goated session status                        # Health, busy state, context estimate
-./goated session restart                       # Kill and restart the active runtime tmux session
-./goated session send /context                 # Send a slash command or text to the active runtime
-./goated session send "What are you working on?"
+./goat session status                        # Health, busy state, context estimate
+./goat session restart                       # Kill and restart the active runtime tmux session
+./goat session send /context                 # Send a slash command or text to the active runtime
+./goat session send "What are you working on?"
 ```
 
 `session send` pastes text directly into the active runtime tmux pane and

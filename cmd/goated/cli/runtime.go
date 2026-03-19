@@ -10,6 +10,7 @@ import (
 	"goated/internal/agent"
 	"goated/internal/app"
 	runtimepkg "goated/internal/runtime"
+	"goated/internal/sessionname"
 	"goated/internal/tmux"
 )
 
@@ -88,12 +89,12 @@ var runtimeStatusCmd = &cobra.Command{
 			{
 				Provider:    agent.RuntimeClaudeTUI,
 				DisplayName: "Claude Code TUI",
-				SessionName: "goat_claude_tui_main",
+				SessionName: sessionname.ClaudeTUI(cfg.WorkspaceDir),
 			},
 			{
 				Provider:    agent.RuntimeCodexTUI,
 				DisplayName: "Codex TUI",
-				SessionName: "goat_codex_tui_main",
+				SessionName: sessionname.CodexTUI(cfg.WorkspaceDir),
 			},
 		} {
 			marker := "inactive"
@@ -130,7 +131,7 @@ var runtimeSwitchCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Configured runtime switched to %s.\n", target)
-		fmt.Printf("Active session after restart: %s\n", sessionNameForRuntime(target))
+		fmt.Printf("Active session after restart: %s\n", sessionNameForRuntime(target, app.LoadConfig().WorkspaceDir))
 		fmt.Println("Restart the daemon for changes to take effect.")
 		return nil
 	},
@@ -141,9 +142,9 @@ var runtimeCleanupCmd = &cobra.Command{
 	Short: "Clean up inactive runtime sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := app.LoadConfig()
-		inactive := sessionNameForRuntime(string(agent.RuntimeClaudeTUI))
+		inactive := sessionNameForRuntime(string(agent.RuntimeClaudeTUI), cfg.WorkspaceDir)
 		if cfg.AgentRuntime == string(agent.RuntimeClaudeTUI) {
-			inactive = sessionNameForRuntime(string(agent.RuntimeCodexTUI))
+			inactive = sessionNameForRuntime(string(agent.RuntimeCodexTUI), cfg.WorkspaceDir)
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -161,14 +162,14 @@ var runtimeCleanupCmd = &cobra.Command{
 	},
 }
 
-func sessionNameForRuntime(runtime string) string {
+func sessionNameForRuntime(runtime string, workspaceDir string) string {
 	switch runtime {
 	case string(agent.RuntimeClaude):
 		return "goat_claude_main"
 	case string(agent.RuntimeCodexTUI):
-		return "goat_codex_tui_main"
+		return sessionname.CodexTUI(workspaceDir)
 	default:
-		return "goat_claude_tui_main"
+		return sessionname.ClaudeTUI(workspaceDir)
 	}
 }
 

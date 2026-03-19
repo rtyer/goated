@@ -225,6 +225,16 @@ install_system() {
 
 install_go() {
   local os arch url archive
+
+  if [[ -x "$LOCAL_GO_BIN" ]]; then
+    local installed_version
+    installed_version="$("$LOCAL_GO_BIN" version | awk '{print $3}' | sed 's/^go//')"
+    if [[ "$installed_version" == "$GO_VERSION" ]]; then
+      echo "Go $GO_VERSION already installed at $LOCAL_GO_ROOT"
+      return 0
+    fi
+  fi
+
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   arch="$(uname -m)"
 

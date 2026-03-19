@@ -7,6 +7,7 @@ import (
 
 	"goated/internal/agent"
 	"goated/internal/db"
+	"goated/internal/sessionname"
 	"goated/internal/subagent"
 )
 
@@ -24,6 +25,7 @@ func (h *HeadlessRuntime) Descriptor() agent.RuntimeDescriptor {
 
 func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agent.HeadlessRequest) (agent.HeadlessResult, error) {
 	version := h.Version(ctx)
+	workspaceDir := chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
 	cmd := exec.CommandContext(
 		ctx,
 		"codex",
@@ -32,7 +34,7 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
 	)
-	cmd.Dir = chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
+	cmd.Dir = workspaceDir
 	cmd.Stdin = strings.NewReader(req.Prompt)
 
 	result, err := subagent.RunSyncCommand(ctx, store, cmd, subagent.RunOpts{
@@ -44,7 +46,7 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 		ChatID:       req.ChatID,
 		Silent:       req.Silent,
 		LogCaller:    req.LogCaller,
-		SessionName:  "goat_codex_tui_main",
+		SessionName:  sessionname.CodexTUI(workspaceDir),
 		Runtime: db.ExecutionRuntime{
 			Provider: "codex_tui",
 			Mode:     "headless_exec",
@@ -63,6 +65,7 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 
 func (h *HeadlessRuntime) RunBackground(store *db.Store, req agent.HeadlessRequest) (agent.HeadlessResult, error) {
 	version := h.Version(context.Background())
+	workspaceDir := chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
 	cmd := exec.Command(
 		"codex",
 		"exec",
@@ -70,7 +73,7 @@ func (h *HeadlessRuntime) RunBackground(store *db.Store, req agent.HeadlessReque
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-c", `model_instructions_file="GOATED.md"`,
 	)
-	cmd.Dir = chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
+	cmd.Dir = workspaceDir
 	cmd.Stdin = strings.NewReader(req.Prompt)
 
 	result, err := subagent.RunBackgroundCommand(store, cmd, subagent.RunOpts{
@@ -82,7 +85,7 @@ func (h *HeadlessRuntime) RunBackground(store *db.Store, req agent.HeadlessReque
 		ChatID:       req.ChatID,
 		Silent:       req.Silent,
 		LogCaller:    req.LogCaller,
-		SessionName:  "goat_codex_tui_main",
+		SessionName:  sessionname.CodexTUI(workspaceDir),
 		Runtime: db.ExecutionRuntime{
 			Provider: "codex_tui",
 			Mode:     "headless_exec",
