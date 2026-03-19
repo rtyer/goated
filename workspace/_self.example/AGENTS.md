@@ -5,14 +5,14 @@ This directory is a reusable example of a private `self/` repo for Goated.
 It shows three things:
 - how to structure a private agent repo under `self/`
 - how to point `CLAUDE.md` and `GEMINI.md` at one shared instruction file
-- how to build a generalized version of the `alan` CLI as a Go/Cobra tool
+- how to build a reusable personal CLI as a Go/Cobra tool
 
 ## Layout
 
 - `AGENTS.md` is the shared entrypoint for agent-specific instructions
 - `CLAUDE.md` is a symlink to `AGENTS.md`
 - `GEMINI.md` is a symlink to `AGENTS.md`
-- `tools/toolbox/` contains a reusable Go CLI skeleton
+- `tools/toolbox-cli/` contains a reusable Go CLI skeleton
 - `tools/toolbox` is the binary produced by that module after build
 
 ## Conventions
@@ -24,8 +24,8 @@ It shows three things:
 
 ## Example CLI
 
-The example CLI under `tools/toolbox/` is named `toolbox`. It generalizes the main
-patterns from `alan`:
+The example CLI under `tools/toolbox-cli/` is named `toolbox`. It demonstrates the main
+patterns for a reusable personal CLI:
 - one binary with many subcommands
 - automatic `chdir` into the private self repo
 - file-backed logs under `logs/`

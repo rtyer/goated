@@ -2,8 +2,11 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -114,16 +117,88 @@ var bootstrapCmd = &cobra.Command{
 		}
 
 		fmt.Println()
-		fmt.Println("Bootstrap complete. Next steps:")
-		fmt.Println("  1. Build:       ./build.sh")
-		fmt.Println("  2. Start:       ./goated daemon run")
-		fmt.Println("  3. Watchdog:    Install the daemon watchdog cron (checks every 2 min):")
-		fmt.Println()
 		repoRoot, _ := os.Getwd()
-		fmt.Printf("     (crontab -l 2>/dev/null; echo '*/2 * * * * %s/scripts/watchdog.sh') | crontab -\n", repoRoot)
+		if err := runBootstrapPostSetup(repoRoot); err != nil {
+			return err
+		}
 		fmt.Println()
+		fmt.Println("Bootstrap complete.")
 		return nil
 	},
+}
+
+func runBootstrapPostSetup(repoRoot string) error {
+	fmt.Println("Running post-bootstrap setup automatically so this workspace is immediately usable.")
+
+	fmt.Println()
+	fmt.Println("[1/3] Building binaries with ./build.sh")
+	fmt.Println("Reason: bootstrap writes config and seeds self/, but the workspace is not actually runnable until goated and workspace/goat are built.")
+	buildCmd := exec.Command(filepath.Join(repoRoot, "build.sh"))
+	buildCmd.Dir = repoRoot
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("run build.sh: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("[2/3] Starting the goated daemon")
+	fmt.Println("Reason: a successful bootstrap should leave the gateway running instead of requiring a separate manual start step.")
+	goatedBin := filepath.Join(repoRoot, "goated")
+	startCmd := exec.Command(goatedBin, "daemon", "run")
+	startCmd.Dir = repoRoot
+	startCmd.Stdout = os.Stdout
+	startCmd.Stderr = os.Stderr
+	if err := startCmd.Run(); err != nil {
+		return fmt.Errorf("start daemon: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("[3/3] Installing the watchdog cron")
+	fmt.Println("Reason: the watchdog restarts the daemon if it dies, so a fresh bootstrap should also make the service resilient.")
+	if err := installWatchdogCron(repoRoot); err != nil {
+		return err
+	}
+	fmt.Println("Watchdog cron installed or already present.")
+	return nil
+}
+
+func installWatchdogCron(repoRoot string) error {
+	watchdogLine := fmt.Sprintf("*/2 * * * * %s/scripts/watchdog.sh", repoRoot)
+
+	listCmd := exec.Command("crontab", "-l")
+	listOut, err := listCmd.Output()
+	current := ""
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !os.IsNotExist(err) && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 1) {
+			return fmt.Errorf("read current crontab: %w", err)
+		}
+	} else {
+		current = string(listOut)
+	}
+
+	if strings.Contains(current, watchdogLine) {
+		return nil
+	}
+
+	var buf bytes.Buffer
+	current = strings.TrimRight(current, "\n")
+	if current != "" {
+		buf.WriteString(current)
+		buf.WriteByte('\n')
+	}
+	buf.WriteString(watchdogLine)
+	buf.WriteByte('\n')
+
+	installCmd := exec.Command("crontab", "-")
+	installCmd.Stdin = &buf
+	installCmd.Stdout = os.Stdout
+	installCmd.Stderr = os.Stderr
+	if err := installCmd.Run(); err != nil {
+		return fmt.Errorf("install watchdog crontab entry: %w", err)
+	}
+	return nil
 }
 
 func maybeResetBootstrapChannels(reader *bufio.Reader, store *db.Store) error {

@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Building toolbox..."
 (
-  cd "$ROOT_DIR/tools/toolbox"
+  cd "$ROOT_DIR/tools/toolbox-cli"
   go build -o ../toolbox ./cmd/toolbox
 )
 
