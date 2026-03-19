@@ -49,6 +49,7 @@ type RunOpts struct {
 	ChatID       string
 	Silent       bool // suppress success notifications to main session
 	SessionName  string
+	Model        string // claude CLI --model value; empty means default
 	Runtime      db.ExecutionRuntime
 	LogCaller    string // propagated as LOG_CALLER env var to child process
 }
@@ -160,7 +161,11 @@ func buildEnv(logCaller string) []string {
 // RunSync runs a Claude-compatible subagent synchronously, blocking until it completes.
 // Tracks the run in the database if store is non-nil.
 func RunSync(ctx context.Context, store *db.Store, opts RunOpts) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "claude", "--dangerously-skip-permissions", "-p", opts.Prompt)
+	args := []string{"--dangerously-skip-permissions", "-p", opts.Prompt}
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = opts.WorkspaceDir
 	cmd.Env = buildEnv(opts.LogCaller)
 	if opts.Runtime.Provider == "" {
@@ -179,7 +184,11 @@ func RunSync(ctx context.Context, store *db.Store, opts RunOpts) ([]byte, error)
 // RunBackground starts a Claude-compatible subagent in the background and returns immediately.
 // Tracks the run in the database if store is non-nil.
 func RunBackground(store *db.Store, opts RunOpts) (pid int, err error) {
-	cmd := exec.Command("claude", "--dangerously-skip-permissions", "-p", opts.Prompt)
+	args := []string{"--dangerously-skip-permissions", "-p", opts.Prompt}
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	cmd := exec.Command("claude", args...)
 	cmd.Dir = opts.WorkspaceDir
 	cmd.Env = buildEnv(opts.LogCaller)
 	if opts.Runtime.Provider == "" {

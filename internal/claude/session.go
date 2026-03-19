@@ -24,6 +24,7 @@ const postSendWaitTimeout = 6 * time.Minute
 type SessionRuntime struct {
 	workspaceDir string
 	logDir       string
+	model        string // claude CLI --model value; empty means default
 	redactor     *msglog.Redactor
 
 	mu        sync.Mutex
@@ -33,11 +34,12 @@ type SessionRuntime struct {
 	done      chan struct{} // closed when proc exits
 }
 
-func NewSessionRuntime(workspaceDir, logDir string) *SessionRuntime {
+func NewSessionRuntime(workspaceDir, logDir, model string) *SessionRuntime {
 	credsDir := filepath.Join(workspaceDir, "creds")
 	return &SessionRuntime{
 		workspaceDir: workspaceDir,
 		logDir:       logDir,
+		model:        model,
 		redactor:     msglog.NewRedactor(credsDir),
 	}
 }
@@ -54,6 +56,28 @@ func (r *SessionRuntime) Descriptor() agent.RuntimeDescriptor {
 			SupportsReset:              true,
 		},
 	}
+}
+
+// baseArgs returns the common CLI flags for all claude -p invocations.
+func (r *SessionRuntime) baseArgs() []string {
+	args := []string{
+		"--output-format", "json",
+		"--dangerously-skip-permissions",
+		"--setting-sources", "project,local",
+		"--settings", r.hooksSettingsFile(),
+	}
+	if r.model != "" {
+		args = append(args, "--model", r.model)
+		// Fallback must differ from the main model
+		fallback := "sonnet"
+		if r.model == "sonnet" || r.model == "claude-sonnet-4-6" {
+			fallback = "haiku"
+		}
+		args = append(args, "--fallback-model", fallback)
+	} else {
+		args = append(args, "--fallback-model", "sonnet")
+	}
+	return args
 }
 
 // sessionDir returns the directory for claude session state files.
@@ -139,14 +163,9 @@ func (r *SessionRuntime) EnsureSession(ctx context.Context) error {
 func (r *SessionRuntime) warmUpSession(ctx context.Context) error {
 	fmt.Fprintf(os.Stderr, "[%s] warming up claude session...\n", time.Now().Format(time.RFC3339))
 
-	args := []string{
+	args := append([]string{
 		"-p", "You are being initialized. Read your docs and say 'ready' — nothing else.",
-		"--output-format", "json",
-		"--dangerously-skip-permissions",
-		"--setting-sources", "project,local",
-		"--settings", r.hooksSettingsFile(),
-		"--fallback-model", "sonnet",
-	}
+	}, r.baseArgs()...)
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = r.workspaceDir
@@ -176,21 +195,25 @@ func (r *SessionRuntime) warmUpSession(ctx context.Context) error {
 }
 
 func (r *SessionRuntime) SendUserPrompt(ctx context.Context, channel, chatID, userPrompt string, attachments *agent.MessageAttachments, messageID, threadID string) error {
+	envelope := agent.BuildPromptEnvelope(channel, chatID, userPrompt, attachments, messageID, threadID)
+	return r.sendEnvelope(ctx, envelope)
+}
+
+func (r *SessionRuntime) SendBatchPrompt(ctx context.Context, channel, chatID string, messages []agent.PromptMessage) error {
+	envelope := agent.BuildBatchEnvelope(channel, chatID, messages)
+	return r.sendEnvelope(ctx, envelope)
+}
+
+// sendEnvelope launches a claude -p process with the given pre-built envelope.
+// It waits for any in-flight process to finish first (FIFO — only one caller
+// can be waiting at a time when called from the sequential message queue).
+func (r *SessionRuntime) sendEnvelope(ctx context.Context, envelope string) error {
 	if err := r.EnsureSession(ctx); err != nil {
 		return err
 	}
 
-	envelope := agent.BuildPromptEnvelope(channel, chatID, userPrompt, attachments, messageID, threadID)
-
 	// Build the claude command — only use --resume if we have a session ID
-	args := []string{
-		"-p", envelope,
-		"--output-format", "json",
-		"--dangerously-skip-permissions",
-		"--setting-sources", "project,local",
-		"--settings", r.hooksSettingsFile(),
-		"--fallback-model", "sonnet",
-	}
+	args := append([]string{"-p", envelope}, r.baseArgs()...)
 	sessionID := r.readSessionID()
 	if sessionID != "" {
 		args = append(args, "--resume", sessionID)
@@ -223,9 +246,8 @@ func (r *SessionRuntime) SendUserPrompt(ctx context.Context, channel, chatID, us
 	cmd.Stderr = &stderrWriter{file: outFile, buf: &stderrBuf, redactor: r.redactor}
 
 	// Serialize access: if a process is already running, wait for it to finish.
-	// Loop handles the case where multiple goroutines are waiting — after the
-	// current process exits, only the first to re-acquire the lock proceeds;
-	// the rest loop and wait on the next process's done channel.
+	// Only one goroutine should be waiting here at a time (the sequential
+	// message queue ensures this), so there is no FIFO contention.
 	r.mu.Lock()
 	for r.proc != nil {
 		done := r.done

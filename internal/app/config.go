@@ -12,11 +12,48 @@ import (
 	"github.com/spf13/viper"
 )
 
+// validClaudeModels lists the model IDs and aliases accepted by the claude CLI's --model flag.
+var validClaudeModels = map[string]bool{
+	// Aliases (resolve to latest)
+	"sonnet": true, "opus": true, "haiku": true,
+	"sonnet[1m]": true, "opus[1m]": true,
+	"opusplan": true,
+
+	// Current models
+	"claude-opus-4-6": true, "claude-sonnet-4-6": true,
+	"claude-haiku-4-5-20251001": true, "claude-haiku-4-5": true,
+	"claude-opus-4-6[1m]": true, "claude-sonnet-4-6[1m]": true,
+
+	// Recent models
+	"claude-sonnet-4-5-20250929": true, "claude-sonnet-4-5": true,
+	"claude-opus-4-5-20251101": true, "claude-opus-4-5": true,
+	"claude-opus-4-1-20250805": true, "claude-opus-4-1": true,
+	"claude-sonnet-4-20250514": true, "claude-sonnet-4-0": true,
+	"claude-opus-4-20250514": true, "claude-opus-4-0": true,
+}
+
+// ValidateClaudeModel returns an error if the model ID is not recognized.
+// Empty string is valid (means use default).
+func ValidateClaudeModel(model string) error {
+	if model == "" {
+		return nil
+	}
+	if !validClaudeModels[model] {
+		var valid []string
+		for k := range validClaudeModels {
+			valid = append(valid, k)
+		}
+		return fmt.Errorf("invalid claude model %q; valid models: sonnet, opus, haiku, claude-opus-4-6, claude-sonnet-4-6, etc.", model)
+	}
+	return nil
+}
+
 type Config struct {
 	WorkspaceDir                 string
 	DBPath                       string
 	LogDir                       string
 	AgentRuntime                 string
+	Model                        string // claude CLI --model value (e.g. "sonnet", "opus", "claude-opus-4-6")
 	TelegramBotToken             string
 	Gateway                      string
 	TelegramMode                 string
@@ -51,6 +88,7 @@ func LoadConfig() Config {
 	// Defaults for all settings keys
 	v.SetDefault("gateway", "telegram")
 	v.SetDefault("agent_runtime", "claude")
+	v.SetDefault("model", "")
 	v.SetDefault("default_timezone", "America/Los_Angeles")
 	v.SetDefault("workspace_dir", "")
 	v.SetDefault("db_path", "")
@@ -66,6 +104,7 @@ func LoadConfig() Config {
 	// Bind env vars so they override config file values
 	v.BindEnv("gateway", "GOAT_GATEWAY")
 	v.BindEnv("agent_runtime", "GOAT_AGENT_RUNTIME")
+	v.BindEnv("model", "GOAT_MODEL")
 	v.BindEnv("default_timezone", "GOAT_DEFAULT_TIMEZONE")
 	v.BindEnv("workspace_dir", "GOAT_WORKSPACE_DIR")
 	v.BindEnv("db_path", "GOAT_DB_PATH")
@@ -133,6 +172,13 @@ func LoadConfig() Config {
 		slackAttRoot = filepath.Join(configDir, slackAttRoot)
 	}
 
+	// Validate model if set
+	model := v.GetString("model")
+	if err := ValidateClaudeModel(model); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: %v\n", err)
+		model = "" // fall back to default
+	}
+
 	// Resolve creds directory for secrets
 	credsDir := filepath.Join(workspace, "creds")
 
@@ -141,6 +187,7 @@ func LoadConfig() Config {
 		DBPath:                       dbPath,
 		LogDir:                       logDir,
 		AgentRuntime:                 v.GetString("agent_runtime"),
+		Model:                        model,
 		TelegramBotToken:             loadCred(credsDir, "GOAT_TELEGRAM_BOT_TOKEN"),
 		Gateway:                      v.GetString("gateway"),
 		TelegramMode:                 v.GetString("telegram.mode"),

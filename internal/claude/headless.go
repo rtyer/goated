@@ -12,14 +12,15 @@ import (
 
 type HeadlessRuntime struct {
 	WorkspaceDir string
+	Model        string
 }
 
-func NewHeadlessRuntime(workspaceDir string) *HeadlessRuntime {
-	return &HeadlessRuntime{WorkspaceDir: workspaceDir}
+func NewHeadlessRuntime(workspaceDir, model string) *HeadlessRuntime {
+	return &HeadlessRuntime{WorkspaceDir: workspaceDir, Model: model}
 }
 
 func (h *HeadlessRuntime) Descriptor() agent.RuntimeDescriptor {
-	return NewSessionRuntime(h.WorkspaceDir, "").Descriptor()
+	return NewSessionRuntime(h.WorkspaceDir, "", "").Descriptor()
 }
 
 func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agent.HeadlessRequest) (agent.HeadlessResult, error) {
@@ -33,6 +34,7 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 		Silent:       req.Silent,
 		LogCaller:    req.LogCaller,
 		SessionName:  "goat_claude_main",
+		Model:        h.Model,
 		Runtime: db.ExecutionRuntime{
 			Provider: "claude",
 			Mode:     "headless_exec",
@@ -65,6 +67,7 @@ func (h *HeadlessRuntime) RunBackground(store *db.Store, req agent.HeadlessReque
 		Silent:       req.Silent,
 		LogCaller:    req.LogCaller,
 		SessionName:  "goat_claude_main",
+		Model:        h.Model,
 		Runtime: db.ExecutionRuntime{
 			Provider: "claude",
 			Mode:     "headless_exec",

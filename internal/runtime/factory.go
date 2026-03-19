@@ -31,8 +31,8 @@ func (r *runtimeImpl) Descriptor() agent.RuntimeDescriptor {
 func New(cfg app.Config) (agent.Runtime, error) {
 	switch agent.RuntimeProvider(cfg.AgentRuntime) {
 	case "", agent.RuntimeClaude:
-		session := claude.NewSessionRuntime(cfg.WorkspaceDir, cfg.LogDir)
-		headless := claude.NewHeadlessRuntime(cfg.WorkspaceDir)
+		session := claude.NewSessionRuntime(cfg.WorkspaceDir, cfg.LogDir, cfg.Model)
+		headless := claude.NewHeadlessRuntime(cfg.WorkspaceDir, cfg.Model)
 		return &runtimeImpl{
 			session:    session,
 			headless:   headless,
