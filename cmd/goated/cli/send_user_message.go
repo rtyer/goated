@@ -1,31 +1,25 @@
 package cli
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"goated/internal/app"
 	"goated/internal/msglog"
-	runtimepkg "goated/internal/runtime"
-	slackpkg "goated/internal/slack"
-	"goated/internal/util"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	slackapi "github.com/slack-go/slack"
 )
 
 var sendUserMessageCmd = &cobra.Command{
 	Use:   "send_user_message",
-	Short: "Send a markdown message to the user via the active gateway",
-	Long: `Send a message to the user. The message is read from stdin as markdown.
-The active gateway (telegram or slack) is determined by GOAT_GATEWAY.
+	Short: "Queue a markdown message for delivery via the daemon",
+	Long: `Queue a message for the daemon to send to the user. The message is read
+from stdin as markdown.
 
 Example:
   echo "Hello **world**" | ./goat send_user_message --chat 123456
@@ -41,9 +35,6 @@ Example:
 			return fmt.Errorf("--chat is required")
 		}
 
-		cfg := app.LoadConfig()
-
-		// Read message from stdin
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return fmt.Errorf("reading stdin: %w", err)
@@ -53,167 +44,45 @@ Example:
 			return fmt.Errorf("empty message; pipe markdown into stdin")
 		}
 
-		// Set up message logging
+		cfg := app.LoadConfig()
 		requestID := os.Getenv("GOAT_REQUEST_ID")
 		if requestID == "" {
 			requestID = msglog.NewRequestID()
 		}
-		logger := msglog.NewCLILogger(cfg.LogDir, cfg.DefaultTimezone, cfg.WorkspaceDir)
+		socketPath := filepath.Join(cfg.LogDir, "goated.sock")
+		conn, err := net.Dial("unix", socketPath)
+		if err != nil {
+			return fmt.Errorf("connect daemon socket %s: %w", socketPath, err)
+		}
+		defer conn.Close()
 
-		responseData := msglog.AgentResponseData{
-			ChatID:  chatID,
-			Gateway: cfg.Gateway,
-			Text:    text,
-			TextLen: len(text),
+		if err := json.NewEncoder(conn).Encode(daemonSendRequest{
+			RequestID: requestID,
+			ChatID:    chatID,
+			Text:      text,
+		}); err != nil {
+			return fmt.Errorf("send daemon request: %w", err)
 		}
 
-		// Log pending response
-		logger.LogAgentResponse(requestID, responseData, msglog.StatusPending, "")
-
-		var sendErr error
-		switch cfg.Gateway {
-		case "slack":
-			sendErr = sendViaSlack(cfg, chatID, text)
-		default: // "telegram"
-			sendErr = sendViaTelegram(cfg, chatID, text)
+		var resp daemonSendResponse
+		if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+			return fmt.Errorf("read daemon response: %w", err)
+		}
+		if !resp.OK {
+			if resp.Error == "" {
+				resp.Error = "unknown daemon error"
+			}
+			return fmt.Errorf("daemon rejected message: %s", resp.Error)
 		}
 
-		if sendErr != nil {
-			logger.LogAgentResponse(requestID, responseData, msglog.StatusFailed, sendErr.Error())
-			return sendErr
-		}
-
-		logger.UpdateStatus(requestID, msglog.EntryAgentResponse, msglog.StatusSent)
+		fmt.Fprintf(os.Stderr, "Queued daemon delivery for chat %s (%d chars)\n", chatID, len(text))
 		return nil
 	},
 }
 
-func sendViaTelegram(cfg app.Config, chatID, text string) error {
-	// Validate chat ID is a number (Telegram requires numeric IDs)
-	if _, err := strconv.ParseInt(chatID, 10, 64); err != nil {
-		return fmt.Errorf("invalid chat ID %q: must be a number", chatID)
-	}
-
-	token := cfg.TelegramBotToken
-	if token == "" {
-		return fmt.Errorf("GOAT_TELEGRAM_BOT_TOKEN is required")
-	}
-
-	bot, err := tgbotapi.NewBotAPI(token)
-	if err != nil {
-		return fmt.Errorf("init telegram: %w", err)
-	}
-
-	chat, _ := strconv.ParseInt(chatID, 10, 64)
-
-	// Try HTML-formatted message first
-	htmlText := util.MarkdownToTelegramHTML(text)
-	msg := tgbotapi.NewMessage(chat, htmlText)
-	msg.ParseMode = "HTML"
-	if _, err := bot.Send(msg); err == nil {
-		fmt.Fprintf(os.Stderr, "Message sent to chat %s (%d chars)\n", chatID, len(text))
-	} else {
-		// Fallback to plain text
-		msg = tgbotapi.NewMessage(chat, text)
-		if _, err := bot.Send(msg); err != nil {
-			return fmt.Errorf("send message: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Message sent to chat %s (%d chars, plain text fallback)\n", chatID, len(text))
-	}
-	return nil
-}
-
-func sendViaSlack(cfg app.Config, channelID, text string) error {
-	token := cfg.SlackBotToken
-	if token == "" {
-		return fmt.Errorf("GOAT_SLACK_BOT_TOKEN is required")
-	}
-
-	client := slackapi.New(token)
-	mrkdwn := util.MarkdownToSlackMrkdwn(text)
-
-	// Atomically claim the thinking indicator so no other process can race us
-	hadThinking := false
-	if ts := slackpkg.ClaimThinkingTS(); ts != "" {
-		_, _, _ = client.DeleteMessage(channelID, ts)
-		hadThinking = true
-	}
-
-	// Post the real response as a new message
-	_, _, err := client.PostMessage(channelID,
-		slackapi.MsgOptionText(mrkdwn, false),
-		slackapi.MsgOptionDisableLinkUnfurl(),
-	)
-	if err != nil {
-		return fmt.Errorf("send slack message: %w", err)
-	}
-	fmt.Fprintf(os.Stderr, "Message sent to channel %s (%d chars)\n", channelID, len(text))
-
-	// If we cleared a thinking indicator, check if the active runtime is still busy.
-	// If so, post a new thinking indicator, then poll for idle and clean it up.
-	if hadThinking {
-		if isRuntimeBusy(cfg) {
-			postSlackThinking(client, channelID)
-			waitAndClearThinking(cfg, client, channelID)
-		}
-	}
-
-	return nil
-}
-
-func isRuntimeBusy(cfg app.Config) bool {
-	runtime, err := runtimepkg.New(cfg)
-	if err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	state, err := runtime.Session().GetSessionState(ctx)
-	if err != nil {
-		return false
-	}
-	return state.Busy()
-}
-
-// waitAndClearThinking polls until the active runtime goes idle, then deletes
-// any remaining thinking indicator. If another send_user_message call runs
-// first and clears the ThinkingFile, this is a no-op.
-func waitAndClearThinking(cfg app.Config, client *slackapi.Client, channelID string) {
-	runtime, err := runtimepkg.New(cfg)
-	if err != nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	_, _ = runtime.Session().WaitForAwaitingInput(ctx, 5*time.Minute)
-
-	// Atomically claim the thinking indicator; if empty, another process handled it
-	ts := slackpkg.ClaimThinkingTS()
-	if ts == "" {
-		return
-	}
-	_, _, _ = client.DeleteMessage(channelID, ts)
-	fmt.Fprintf(os.Stderr, "Cleaned up orphaned thinking indicator in channel %s\n", channelID)
-}
-
-// postSlackThinking posts a new "_thinking..._" indicator and writes the
-// ThinkingFile so the next send_user_message call can replace it.
-// Also spawns a TTL reaper as a safety net against orphaned indicators.
-func postSlackThinking(client *slackapi.Client, channelID string) {
-	_, ts, err := client.PostMessage(channelID,
-		slackapi.MsgOptionText("_thinking..._", false),
-	)
-	if err != nil {
-		return
-	}
-	_ = slackpkg.WriteThinkingTS(ts)
-	go slackpkg.ReapThinkingIndicator(client, channelID, ts)
-}
-
 func init() {
 	sendUserMessageCmd.Flags().String("chat", "", "Chat/channel ID to send to (required)")
-	sendUserMessageCmd.Flags().String("source", "", "Caller source (e.g. cron, subagent) — triggers main session notification")
+	sendUserMessageCmd.Flags().String("source", "", "Caller source (e.g. cron, subagent) — reserved for daemon delivery")
 	sendUserMessageCmd.Flags().String("log", "", "Path to the caller's log file")
 	rootCmd.AddCommand(sendUserMessageCmd)
 }

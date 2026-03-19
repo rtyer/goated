@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -30,6 +31,17 @@ var bootstrapCmd = &cobra.Command{
 		runtime := prompt(reader, "Agent runtime (claude/claude_tui/codex_tui)", withDefault(strFromMap(existing, "agent_runtime"), "claude"))
 		if runtime != "claude" && runtime != "claude_tui" && runtime != "codex_tui" {
 			return fmt.Errorf("agent runtime must be claude, claude_tui, or codex_tui")
+		}
+
+		cfg := app.LoadConfig()
+		store, err := db.Open(cfg.DBPath)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+
+		if err := maybeResetBootstrapChannels(reader, store); err != nil {
+			return err
 		}
 
 		// Interactive channel setup
@@ -65,13 +77,6 @@ var bootstrapCmd = &cobra.Command{
 			return fmt.Errorf("write creds: %w", err)
 		}
 
-		// Init DB
-		cfg := app.LoadConfig()
-		store, err := db.Open(cfg.DBPath)
-		if err != nil {
-			return err
-		}
-		defer store.Close()
 		fmt.Println()
 		fmt.Println("Database initialized at", cfg.DBPath)
 
@@ -115,6 +120,98 @@ var bootstrapCmd = &cobra.Command{
 		fmt.Println()
 		return nil
 	},
+}
+
+func maybeResetBootstrapChannels(reader *bufio.Reader, store *db.Store) error {
+	channels, err := store.AllChannels()
+	if err != nil {
+		return err
+	}
+	if len(channels) == 0 {
+		return nil
+	}
+
+	activeChannel := store.GetMeta("active_channel")
+
+	fmt.Println()
+	fmt.Println("Configured channels already exist:")
+	for _, ch := range channels {
+		marker := "  "
+		if ch.Name == activeChannel {
+			marker = "* "
+		}
+		fmt.Printf("%s%s (%s)\n", marker, ch.Name, ch.Type)
+	}
+	fmt.Println()
+	fmt.Println("You can keep them, delete some, or delete all before creating the replacement channel.")
+
+	deleteInput := prompt(reader, "Channels to delete before starting over (comma-separated names, 'all', or blank to keep)", "")
+	deleteInput = strings.TrimSpace(deleteInput)
+	if deleteInput == "" {
+		return nil
+	}
+
+	selected, deleteAll, err := parseChannelDeleteSelection(deleteInput, channels)
+	if err != nil {
+		return err
+	}
+
+	deletedActive := false
+	for _, name := range selected {
+		if err := store.DeleteChannel(name); err != nil {
+			return err
+		}
+		if name == activeChannel {
+			deletedActive = true
+		}
+		fmt.Printf("Deleted channel %q.\n", name)
+	}
+
+	if deleteAll || deletedActive {
+		if err := store.SetMeta("active_channel", ""); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func parseChannelDeleteSelection(input string, channels []db.Channel) ([]string, bool, error) {
+	if strings.EqualFold(input, "all") {
+		names := make([]string, 0, len(channels))
+		for _, ch := range channels {
+			names = append(names, ch.Name)
+		}
+		return names, true, nil
+	}
+
+	available := make(map[string]struct{}, len(channels))
+	for _, ch := range channels {
+		available[ch.Name] = struct{}{}
+	}
+
+	selected := make([]string, 0, len(channels))
+	seen := make(map[string]struct{}, len(channels))
+	for _, raw := range strings.Split(input, ",") {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, ok := available[name]; !ok {
+			return nil, false, fmt.Errorf("channel %q not found", name)
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		selected = append(selected, name)
+	}
+
+	if len(selected) == 0 {
+		return nil, false, fmt.Errorf("no valid channels selected")
+	}
+
+	return selected, false, nil
 }
 
 // strFromMap safely extracts a string value from a map[string]any.

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -177,6 +178,14 @@ func promptChannel(reader *bufio.Reader) (*db.Channel, error) {
 
 	switch chType {
 	case "telegram":
+		fmt.Println()
+		fmt.Println("  To get a Telegram bot token:")
+		fmt.Println("  1. Open Telegram and message @BotFather")
+		fmt.Println("  2. Send /newbot and follow the prompts")
+		fmt.Println("  3. Copy the bot token it gives you")
+		fmt.Println("  https://core.telegram.org/bots#botfather")
+		fmt.Println()
+
 		token := prompt(reader, "Telegram bot token", "")
 		if token == "" {
 			return nil, fmt.Errorf("telegram bot token is required")
@@ -193,6 +202,28 @@ func promptChannel(reader *bufio.Reader) (*db.Channel, error) {
 		}
 
 	case "slack":
+		appName := prompt(reader, "Slack app display name", name)
+
+		manifest := slackAppManifest(appName)
+		fmt.Println()
+		fmt.Println("  Copy the manifest below and use it to create or update your Slack app:")
+		fmt.Println()
+		fmt.Println("  New app:      https://api.slack.com/apps → Create New App → From a manifest")
+		fmt.Println("  Existing app: https://api.slack.com/apps → Your app → App Manifest → paste & save")
+		fmt.Println()
+		fmt.Println("  ── manifest.json ──")
+		fmt.Println(manifest)
+		fmt.Println("  ────────────────────")
+		fmt.Println()
+		fmt.Println("  After creating/updating the app:")
+		fmt.Println("  1. Install the app to your workspace (OAuth & Permissions → Install)")
+		fmt.Println("  2. Copy the Bot Token (xoxb-...) from OAuth & Permissions")
+		fmt.Println("  3. Go to Socket Mode → generate an App Token (xapp-...)")
+		fmt.Println("     Add the 'connections:write' scope when prompted")
+		fmt.Println("  4. To find your channel ID, right-click a channel in Slack")
+		fmt.Println("     → View channel details → copy the ID at the bottom")
+		fmt.Println()
+
 		botToken := prompt(reader, "Slack bot token (xoxb-...)", "")
 		if botToken == "" {
 			return nil, fmt.Errorf("slack bot token is required")
@@ -290,6 +321,53 @@ func writeChannelCreds(credsDir string, ch *db.Channel) error {
 		}
 	}
 	return nil
+}
+
+// slackAppManifest returns a JSON manifest for creating/updating a Slack app
+// with all the scopes, events, and settings goated needs.
+func slackAppManifest(displayName string) string {
+	manifest := map[string]any{
+		"display_information": map[string]any{
+			"name": displayName,
+		},
+		"features": map[string]any{
+			"app_home": map[string]any{
+				"home_tab_enabled":               false,
+				"messages_tab_enabled":           true,
+				"messages_tab_read_only_enabled": false,
+			},
+			"bot_user": map[string]any{
+				"display_name":  displayName,
+				"always_online": true,
+			},
+		},
+		"oauth_config": map[string]any{
+			"scopes": map[string]any{
+				"bot": []string{
+					"channels:history",
+					"channels:read",
+					"chat:write",
+					"files:read",
+					"im:history",
+					"im:read",
+					"im:write",
+				},
+			},
+		},
+		"settings": map[string]any{
+			"event_subscriptions": map[string]any{
+				"bot_events": []string{
+					"message.channels",
+					"message.im",
+				},
+			},
+			"org_deploy_enabled":  false,
+			"socket_mode_enabled": true,
+		},
+	}
+
+	data, _ := json.MarshalIndent(manifest, "  ", "  ")
+	return "  " + string(data)
 }
 
 func init() {

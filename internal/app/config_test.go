@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,6 +60,55 @@ func TestDefaultBaseDir(t *testing.T) {
 			t.Fatalf("defaultBaseDir() = %q, want %q", got, root)
 		}
 	})
+}
+
+func TestLoadConfigResolvesRelativePathsFromConfigFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	mustWriteFile(t, filepath.Join(workspace, "goat"))
+	mustWriteFile(t, filepath.Join(workspace, "GOATED.md"))
+
+	config := map[string]any{
+		"workspace_dir": "workspace",
+		"db_path":       "goated.db",
+		"log_dir":       "logs",
+		"slack": map[string]any{
+			"attachments_root": "workspace/tmp/slack/attachments",
+		},
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "goated.json"), data, 0o644); err != nil {
+		t.Fatalf("write goated.json: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("chdir workspace: %v", err)
+	}
+
+	cfg := LoadConfig()
+	if cfg.WorkspaceDir != workspace {
+		t.Fatalf("WorkspaceDir = %q, want %q", cfg.WorkspaceDir, workspace)
+	}
+	if cfg.DBPath != filepath.Join(root, "goated.db") {
+		t.Fatalf("DBPath = %q, want %q", cfg.DBPath, filepath.Join(root, "goated.db"))
+	}
+	if cfg.LogDir != filepath.Join(root, "logs") {
+		t.Fatalf("LogDir = %q, want %q", cfg.LogDir, filepath.Join(root, "logs"))
+	}
+	if cfg.SlackAttachmentsRoot != filepath.Join(root, "workspace", "tmp", "slack", "attachments") {
+		t.Fatalf("SlackAttachmentsRoot = %q, want %q", cfg.SlackAttachmentsRoot, filepath.Join(root, "workspace", "tmp", "slack", "attachments"))
+	}
 }
 
 func mustWriteFile(t *testing.T, path string) {

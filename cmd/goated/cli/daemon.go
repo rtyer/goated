@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -49,6 +50,9 @@ var daemonRunCmd = &cobra.Command{
 
 		if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
 			return fmt.Errorf("mkdir log dir: %w", err)
+		}
+		if err := ensureSelfRepo(cfg.WorkspaceDir); err != nil {
+			return err
 		}
 
 		// Refuse to start if another daemon is running
@@ -97,6 +101,9 @@ var daemonRunCmd = &cobra.Command{
 			return fmt.Errorf("write pid file: %w", err)
 		}
 		defer os.Remove(pidPath)
+		socketPath := filepath.Join(cfg.LogDir, "goated.sock")
+		_ = os.Remove(socketPath)
+		defer os.Remove(socketPath)
 
 		store, err := db.Open(cfg.DBPath)
 		if err != nil {
@@ -168,6 +175,7 @@ var daemonRunCmd = &cobra.Command{
 		go runReRedact(ctx, cfg.LogDir, cfg.WorkspaceDir, cfg.DefaultTimezone)
 
 		var runGateway func() error
+		var responder gateway.Responder
 
 		switch cfg.Gateway {
 		case "slack":
@@ -190,6 +198,7 @@ var daemonRunCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("init slack: %w", err)
 			}
+			responder = conn
 
 			runner := &cronpkg.Runner{
 				Store:        store,
@@ -215,6 +224,7 @@ var daemonRunCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("init telegram: %w", err)
 			}
+			responder = conn
 
 			runner := &cronpkg.Runner{
 				Store:        store,
@@ -241,6 +251,10 @@ var daemonRunCmd = &cobra.Command{
 			}
 		}
 
+		if responder != nil {
+			go runDaemonSocket(ctx, socketPath, responder, msgLogger, cfg.Gateway)
+		}
+
 		if err := runGateway(); err != nil && err != context.Canceled {
 			return fmt.Errorf("gateway: %w", err)
 		}
@@ -263,6 +277,124 @@ var daemonRunCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+type daemonSendRequest struct {
+	RequestID string `json:"request_id"`
+	ChatID    string `json:"chat_id"`
+	Text      string `json:"text"`
+}
+
+type daemonSendResponse struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func runDaemonSocket(ctx context.Context, socketPath string, responder gateway.Responder, logger *msglog.Logger, gatewayName string) {
+	lc := net.ListenConfig{}
+	ln, err := lc.Listen(ctx, "unix", socketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[%s] daemon socket listen failed: %v\n", time.Now().Format(time.RFC3339), err)
+		return
+	}
+	defer ln.Close()
+	_ = os.Chmod(socketPath, 0o600)
+
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+	}()
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			fmt.Fprintf(os.Stderr, "[%s] daemon socket accept failed: %v\n", time.Now().Format(time.RFC3339), err)
+			continue
+		}
+		go handleDaemonSocketConn(ctx, conn, responder, logger, gatewayName)
+	}
+}
+
+func handleDaemonSocketConn(ctx context.Context, conn net.Conn, responder gateway.Responder, logger *msglog.Logger, gatewayName string) {
+	defer conn.Close()
+
+	var req daemonSendRequest
+	if err := json.NewDecoder(conn).Decode(&req); err != nil {
+		_ = json.NewEncoder(conn).Encode(daemonSendResponse{OK: false, Error: "invalid request"})
+		return
+	}
+	if strings.TrimSpace(req.ChatID) == "" {
+		_ = json.NewEncoder(conn).Encode(daemonSendResponse{OK: false, Error: "chat_id is required"})
+		return
+	}
+	req.Text = strings.TrimSpace(req.Text)
+	if req.Text == "" {
+		_ = json.NewEncoder(conn).Encode(daemonSendResponse{OK: false, Error: "text is required"})
+		return
+	}
+
+	if logger != nil {
+		logger.LogAgentResponse(req.RequestID, msglog.AgentResponseData{
+			ChatID:  req.ChatID,
+			Gateway: gatewayName,
+			Text:    req.Text,
+			TextLen: len(req.Text),
+		}, msglog.StatusPending, "")
+	}
+
+	sendErr := responder.SendMessage(ctx, req.ChatID, req.Text)
+	if sendErr != nil {
+		if logger != nil {
+			logger.LogAgentResponse(req.RequestID, msglog.AgentResponseData{
+				ChatID:  req.ChatID,
+				Gateway: gatewayName,
+				Text:    req.Text,
+				TextLen: len(req.Text),
+			}, msglog.StatusFailed, sendErr.Error())
+		}
+		_ = json.NewEncoder(conn).Encode(daemonSendResponse{OK: false, Error: sendErr.Error()})
+		return
+	}
+	if logger != nil {
+		logger.UpdateStatus(req.RequestID, msglog.EntryAgentResponse, msglog.StatusSent)
+	}
+	_ = json.NewEncoder(conn).Encode(daemonSendResponse{OK: true})
+}
+
+func ensureSelfRepo(workspaceDir string) error {
+	if workspaceDir == "" {
+		return fmt.Errorf("workspace directory is not configured")
+	}
+
+	selfDir := filepath.Join(workspaceDir, "self")
+	info, err := os.Stat(selfDir)
+	switch {
+	case err == nil:
+		if !info.IsDir() {
+			return fmt.Errorf("workspace self path %s is not a directory", selfDir)
+		}
+		return nil
+	case !os.IsNotExist(err):
+		return fmt.Errorf("stat %s: %w", selfDir, err)
+	}
+
+	if err := os.MkdirAll(selfDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", selfDir, err)
+	}
+
+	cmd := exec.Command("git", "init")
+	cmd.Dir = selfDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git init in %s: %w: %s", selfDir, err, strings.TrimSpace(string(output)))
+	}
+
+	fmt.Fprintf(os.Stderr, "[%s] initialized workspace self repo at %s\n",
+		time.Now().Format(time.RFC3339), selfDir)
+	return nil
 }
 
 var daemonRestartCmd = &cobra.Command{

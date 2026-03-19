@@ -13,25 +13,25 @@ import (
 )
 
 type Config struct {
-	WorkspaceDir        string
-	DBPath              string
-	LogDir              string
-	AgentRuntime        string
-	TelegramBotToken    string
-	Gateway             string
-	TelegramMode        string
-	TelegramWebhookURL  string
-	TelegramWebhookAddr string
-	TelegramWebhookPath string
-	SlackBotToken       string
-	SlackAppToken       string
-	SlackChannelID      string
+	WorkspaceDir                 string
+	DBPath                       string
+	LogDir                       string
+	AgentRuntime                 string
+	TelegramBotToken             string
+	Gateway                      string
+	TelegramMode                 string
+	TelegramWebhookURL           string
+	TelegramWebhookAddr          string
+	TelegramWebhookPath          string
+	SlackBotToken                string
+	SlackAppToken                string
+	SlackChannelID               string
 	SlackAttachmentsRoot         string
 	SlackAttachmentMaxBytes      int64
 	SlackAttachmentMaxTotalBytes int64
 	SlackAttachmentMaxParallel   int
-	DefaultTimezone     string
-	AdminChatID         string
+	DefaultTimezone              string
+	AdminChatID                  string
 }
 
 func LoadConfig() Config {
@@ -96,29 +96,41 @@ func LoadConfig() Config {
 
 	cwd, _ := os.Getwd()
 	baseDir := defaultBaseDir(cwd, exeDir)
+	configDir := ""
+	if used := v.ConfigFileUsed(); used != "" {
+		configDir = filepath.Dir(used)
+	}
 
 	// Resolve workspace
 	workspace := v.GetString("workspace_dir")
 	if workspace == "" {
 		workspace = defaultWorkspaceDir(cwd, exeDir)
+	} else if configDir != "" && !filepath.IsAbs(workspace) {
+		workspace = filepath.Join(configDir, workspace)
 	}
 
 	// Resolve db path
 	dbPath := v.GetString("db_path")
 	if dbPath == "" {
 		dbPath = filepath.Join(baseDir, "goated.db")
+	} else if configDir != "" && !filepath.IsAbs(dbPath) {
+		dbPath = filepath.Join(configDir, dbPath)
 	}
 
 	// Resolve log dir
 	logDir := v.GetString("log_dir")
 	if logDir == "" {
 		logDir = filepath.Join(baseDir, "logs")
+	} else if configDir != "" && !filepath.IsAbs(logDir) {
+		logDir = filepath.Join(configDir, logDir)
 	}
 
 	// Resolve slack attachments root
 	slackAttRoot := v.GetString("slack.attachments_root")
 	if slackAttRoot == "" {
 		slackAttRoot = filepath.Join(workspace, "tmp", "slack", "attachments")
+	} else if configDir != "" && !filepath.IsAbs(slackAttRoot) {
+		slackAttRoot = filepath.Join(configDir, slackAttRoot)
 	}
 
 	// Resolve creds directory for secrets
@@ -132,7 +144,7 @@ func LoadConfig() Config {
 		TelegramBotToken:             loadCred(credsDir, "GOAT_TELEGRAM_BOT_TOKEN"),
 		Gateway:                      v.GetString("gateway"),
 		TelegramMode:                 v.GetString("telegram.mode"),
-		TelegramWebhookURL:          loadCred(credsDir, "GOAT_TELEGRAM_WEBHOOK_URL"),
+		TelegramWebhookURL:           loadCred(credsDir, "GOAT_TELEGRAM_WEBHOOK_URL"),
 		TelegramWebhookAddr:          v.GetString("telegram.webhook_addr"),
 		TelegramWebhookPath:          v.GetString("telegram.webhook_path"),
 		SlackBotToken:                loadCred(credsDir, "GOAT_SLACK_BOT_TOKEN"),
