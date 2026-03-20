@@ -213,7 +213,11 @@ var daemonRunCmd = &cobra.Command{
 				return fmt.Errorf("GOAT_TELEGRAM_BOT_TOKEN is required")
 			}
 
-			conn, err := telegram.NewConnector(cfg.TelegramBotToken, store)
+			conn, err := telegram.NewConnector(cfg.TelegramBotToken, store, telegram.AttachmentConfig{
+				RootPath:      cfg.TelegramAttachmentsRoot,
+				MaxBytes:      cfg.TelegramAttachmentMaxBytes,
+				MaxTotalBytes: cfg.TelegramAttachmentMaxTotalBytes,
+			})
 			if err != nil {
 				return fmt.Errorf("init telegram: %w", err)
 			}

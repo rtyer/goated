@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +26,16 @@ type OffsetStore interface {
 type Connector struct {
 	bot   *tgbotapi.BotAPI
 	store OffsetStore
+
+	httpClient *http.Client
+
+	attachmentsRootRel string
+	attachmentsRootAbs string
+
+	attachmentMaxBytes  int64
+	attachmentTotalMax  int64
+	attachmentRetention time.Duration
+	sweepEvery          time.Duration
 }
 
 type RunMode string
@@ -39,15 +51,56 @@ type WebhookOptions struct {
 	Path       string
 }
 
-func NewConnector(token string, store OffsetStore) (*Connector, error) {
+func NewConnector(token string, store OffsetStore, attachmentCfg AttachmentConfig) (*Connector, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("init telegram bot: %w", err)
 	}
-	return &Connector{bot: bot, store: store}, nil
+
+	rootPath := strings.TrimSpace(attachmentCfg.RootPath)
+	if rootPath == "" {
+		rootPath = defaultAttachmentsRootRel
+	}
+	rootAbs, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve attachments root: %w", err)
+	}
+	if err := os.MkdirAll(rootAbs, 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir attachments root: %w", err)
+	}
+	rootRel := filepath.ToSlash(rootPath)
+	if filepath.IsAbs(rootPath) {
+		if cwd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(cwd, rootPath); err == nil {
+				rootRel = filepath.ToSlash(rel)
+			}
+		}
+	}
+	maxBytes := attachmentCfg.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultAttachmentMaxBytes
+	}
+	maxTotalBytes := attachmentCfg.MaxTotalBytes
+	if maxTotalBytes <= 0 {
+		maxTotalBytes = defaultAttachmentTotalMax
+	}
+
+	return &Connector{
+		bot:                 bot,
+		store:               store,
+		httpClient:          &http.Client{Timeout: 2 * time.Minute},
+		attachmentsRootRel:  rootRel,
+		attachmentsRootAbs:  rootAbs,
+		attachmentMaxBytes:  maxBytes,
+		attachmentTotalMax:  maxTotalBytes,
+		attachmentRetention: defaultAttachmentRetention,
+		sweepEvery:          defaultAttachmentSweepEvery,
+	}, nil
 }
 
 func (c *Connector) Run(ctx context.Context, handler gateway.Handler, mode RunMode, webhookOpts WebhookOptions) error {
+	go c.runAttachmentSweeper(ctx)
+
 	switch mode {
 	case RunModePolling:
 		return c.runPolling(ctx, handler)
@@ -179,15 +232,33 @@ func (c *Connector) processUpdate(ctx context.Context, handler gateway.Handler, 
 	if update.Message == nil {
 		return nil
 	}
+
 	text := strings.TrimSpace(update.Message.Text)
 	if text == "" {
+		text = strings.TrimSpace(update.Message.Caption)
+	}
+
+	attachments, attachmentResults, failed, succeeded := c.processAttachments(ctx, update.Message)
+	if text == "" && len(attachments) == 0 {
 		return nil
 	}
+
+	if len(attachments)+len(failed) > 0 {
+		fmt.Fprintf(os.Stderr,
+			"telegram attachments summary: count=%d accepted=%d failed=%d bytes=%d\n",
+			len(attachmentResults), len(succeeded), len(failed), sumAttachmentBytes(succeeded),
+		)
+	}
 	msg := gateway.IncomingMessage{
-		Channel: "telegram",
-		ChatID:  strconv.FormatInt(update.Message.Chat.ID, 10),
-		UserID:  strconv.FormatInt(int64(update.Message.From.ID), 10),
-		Text:    text,
+		Channel:              "telegram",
+		ChatID:               strconv.FormatInt(update.Message.Chat.ID, 10),
+		UserID:               strconv.FormatInt(int64(update.Message.From.ID), 10),
+		Text:                 text,
+		MessageID:            strconv.Itoa(update.Message.MessageID),
+		Attachments:          attachments,
+		AttachmentResults:    attachmentResults,
+		AttachmentsFailed:    failed,
+		AttachmentsSucceeded: succeeded,
 	}
 	stopTyping := c.startTypingLoop(ctx, update.Message.Chat.ID)
 	defer stopTyping()

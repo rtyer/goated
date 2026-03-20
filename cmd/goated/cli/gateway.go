@@ -56,7 +56,11 @@ var gatewayTelegramCmd = &cobra.Command{
 			AdminChatID:     cfg.AdminChatID,
 		}
 
-		conn, err := telegram.NewConnector(cfg.TelegramBotToken, database)
+		conn, err := telegram.NewConnector(cfg.TelegramBotToken, database, telegram.AttachmentConfig{
+			RootPath:      cfg.TelegramAttachmentsRoot,
+			MaxBytes:      cfg.TelegramAttachmentMaxBytes,
+			MaxTotalBytes: cfg.TelegramAttachmentMaxTotalBytes,
+		})
 		if err != nil {
 			return err
 		}

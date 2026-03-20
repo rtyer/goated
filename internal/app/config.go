@@ -49,26 +49,29 @@ func ValidateClaudeModel(model string) error {
 }
 
 type Config struct {
-	WorkspaceDir                 string
-	DBPath                       string
-	LogDir                       string
-	AgentRuntime                 string
-	Model                        string // claude CLI --model value (e.g. "sonnet", "opus", "claude-opus-4-6")
-	TelegramBotToken             string
-	Gateway                      string
-	TelegramMode                 string
-	TelegramWebhookURL           string
-	TelegramWebhookAddr          string
-	TelegramWebhookPath          string
-	SlackBotToken                string
-	SlackAppToken                string
-	SlackChannelID               string
-	SlackAttachmentsRoot         string
-	SlackAttachmentMaxBytes      int64
-	SlackAttachmentMaxTotalBytes int64
-	SlackAttachmentMaxParallel   int
-	DefaultTimezone              string
-	AdminChatID                  string
+	WorkspaceDir                    string
+	DBPath                          string
+	LogDir                          string
+	AgentRuntime                    string
+	Model                           string // claude CLI --model value (e.g. "sonnet", "opus", "claude-opus-4-6")
+	TelegramBotToken                string
+	Gateway                         string
+	TelegramMode                    string
+	TelegramWebhookURL              string
+	TelegramWebhookAddr             string
+	TelegramWebhookPath             string
+	TelegramAttachmentsRoot         string
+	TelegramAttachmentMaxBytes      int64
+	TelegramAttachmentMaxTotalBytes int64
+	SlackBotToken                   string
+	SlackAppToken                   string
+	SlackChannelID                  string
+	SlackAttachmentsRoot            string
+	SlackAttachmentMaxBytes         int64
+	SlackAttachmentMaxTotalBytes    int64
+	SlackAttachmentMaxParallel      int
+	DefaultTimezone                 string
+	AdminChatID                     string
 }
 
 func LoadConfig() Config {
@@ -98,6 +101,9 @@ func LoadConfig() Config {
 	v.SetDefault("telegram.mode", "polling")
 	v.SetDefault("telegram.webhook_addr", ":8080")
 	v.SetDefault("telegram.webhook_path", "/telegram/webhook")
+	v.SetDefault("telegram.attachments_root", "")
+	v.SetDefault("telegram.attachment_max_bytes", int64(25*1024*1024))
+	v.SetDefault("telegram.attachment_max_total_bytes", int64(251*1024*1024))
 	v.SetDefault("slack.attachments_root", "")
 	v.SetDefault("slack.channel_id", "")
 	v.SetDefault("slack.attachment_max_bytes", int64(25*1024*1024))
@@ -115,6 +121,9 @@ func LoadConfig() Config {
 	v.BindEnv("telegram.mode", "GOAT_TELEGRAM_MODE")
 	v.BindEnv("telegram.webhook_addr", "GOAT_TELEGRAM_WEBHOOK_LISTEN_ADDR")
 	v.BindEnv("telegram.webhook_path", "GOAT_TELEGRAM_WEBHOOK_PATH")
+	v.BindEnv("telegram.attachments_root", "GOAT_TELEGRAM_ATTACHMENTS_ROOT")
+	v.BindEnv("telegram.attachment_max_bytes", "GOAT_TELEGRAM_ATTACHMENT_MAX_BYTES")
+	v.BindEnv("telegram.attachment_max_total_bytes", "GOAT_TELEGRAM_ATTACHMENT_MAX_TOTAL_BYTES")
 	v.BindEnv("slack.attachments_root", "GOAT_SLACK_ATTACHMENTS_ROOT")
 	v.BindEnv("slack.channel_id", "GOAT_SLACK_CHANNEL_ID")
 	v.BindEnv("slack.attachment_max_bytes", "GOAT_SLACK_ATTACHMENT_MAX_BYTES")
@@ -169,6 +178,14 @@ func LoadConfig() Config {
 	}
 
 	// Resolve slack attachments root
+	telegramAttRoot := v.GetString("telegram.attachments_root")
+	if telegramAttRoot == "" {
+		telegramAttRoot = filepath.Join(workspace, "tmp", "telegram", "attachments")
+	} else if configDir != "" && !filepath.IsAbs(telegramAttRoot) {
+		telegramAttRoot = filepath.Join(configDir, telegramAttRoot)
+	}
+
+	// Resolve slack attachments root
 	slackAttRoot := v.GetString("slack.attachments_root")
 	if slackAttRoot == "" {
 		slackAttRoot = filepath.Join(workspace, "tmp", "slack", "attachments")
@@ -199,26 +216,29 @@ func LoadConfig() Config {
 	}
 
 	return Config{
-		WorkspaceDir:                 workspace,
-		DBPath:                       dbPath,
-		LogDir:                       logDir,
-		AgentRuntime:                 v.GetString("agent_runtime"),
-		Model:                        model,
-		TelegramBotToken:             loadCred(credsDir, "GOAT_TELEGRAM_BOT_TOKEN"),
-		Gateway:                      v.GetString("gateway"),
-		TelegramMode:                 v.GetString("telegram.mode"),
-		TelegramWebhookURL:           loadCred(credsDir, "GOAT_TELEGRAM_WEBHOOK_URL"),
-		TelegramWebhookAddr:          v.GetString("telegram.webhook_addr"),
-		TelegramWebhookPath:          v.GetString("telegram.webhook_path"),
-		SlackBotToken:                loadCred(credsDir, "GOAT_SLACK_BOT_TOKEN"),
-		SlackAppToken:                loadCred(credsDir, "GOAT_SLACK_APP_TOKEN"),
-		SlackChannelID:               slackChannelID,
-		SlackAttachmentsRoot:         slackAttRoot,
-		SlackAttachmentMaxBytes:      v.GetInt64("slack.attachment_max_bytes"),
-		SlackAttachmentMaxTotalBytes: v.GetInt64("slack.attachment_max_total_bytes"),
-		SlackAttachmentMaxParallel:   v.GetInt("slack.attachment_max_parallel"),
-		DefaultTimezone:              v.GetString("default_timezone"),
-		AdminChatID:                  loadCred(credsDir, "GOAT_ADMIN_CHAT_ID"),
+		WorkspaceDir:                    workspace,
+		DBPath:                          dbPath,
+		LogDir:                          logDir,
+		AgentRuntime:                    v.GetString("agent_runtime"),
+		Model:                           model,
+		TelegramBotToken:                loadCred(credsDir, "GOAT_TELEGRAM_BOT_TOKEN"),
+		Gateway:                         v.GetString("gateway"),
+		TelegramMode:                    v.GetString("telegram.mode"),
+		TelegramWebhookURL:              loadCred(credsDir, "GOAT_TELEGRAM_WEBHOOK_URL"),
+		TelegramWebhookAddr:             v.GetString("telegram.webhook_addr"),
+		TelegramWebhookPath:             v.GetString("telegram.webhook_path"),
+		TelegramAttachmentsRoot:         telegramAttRoot,
+		TelegramAttachmentMaxBytes:      v.GetInt64("telegram.attachment_max_bytes"),
+		TelegramAttachmentMaxTotalBytes: v.GetInt64("telegram.attachment_max_total_bytes"),
+		SlackBotToken:                   loadCred(credsDir, "GOAT_SLACK_BOT_TOKEN"),
+		SlackAppToken:                   loadCred(credsDir, "GOAT_SLACK_APP_TOKEN"),
+		SlackChannelID:                  slackChannelID,
+		SlackAttachmentsRoot:            slackAttRoot,
+		SlackAttachmentMaxBytes:         v.GetInt64("slack.attachment_max_bytes"),
+		SlackAttachmentMaxTotalBytes:    v.GetInt64("slack.attachment_max_total_bytes"),
+		SlackAttachmentMaxParallel:      v.GetInt("slack.attachment_max_parallel"),
+		DefaultTimezone:                 v.GetString("default_timezone"),
+		AdminChatID:                     loadCred(credsDir, "GOAT_ADMIN_CHAT_ID"),
 	}
 }
 
