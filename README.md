@@ -230,6 +230,9 @@ scripts/setup_machine.sh install-system
 scripts/setup_machine.sh install-go
 ```
 
+`install-system` installs the baseline Ubuntu/Debian packages Goated expects
+for day-to-day use, including `tmux`, `cron`/`crontab`, and `sqlite3`.
+
 ### Install
 
 ```sh

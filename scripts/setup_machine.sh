@@ -216,8 +216,10 @@ install_system() {
     bash \
     build-essential \
     ca-certificates \
+    cron \
     curl \
     git \
+    sqlite3 \
     tar \
     tmux \
     xz-utils
