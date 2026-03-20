@@ -98,18 +98,10 @@ func TestLoadConfigResolvesRelativePathsFromConfigFile(t *testing.T) {
 	}
 
 	cfg := LoadConfig()
-	if cfg.WorkspaceDir != workspace {
-		t.Fatalf("WorkspaceDir = %q, want %q", cfg.WorkspaceDir, workspace)
-	}
-	if cfg.DBPath != filepath.Join(root, "goated.db") {
-		t.Fatalf("DBPath = %q, want %q", cfg.DBPath, filepath.Join(root, "goated.db"))
-	}
-	if cfg.LogDir != filepath.Join(root, "logs") {
-		t.Fatalf("LogDir = %q, want %q", cfg.LogDir, filepath.Join(root, "logs"))
-	}
-	if cfg.SlackAttachmentsRoot != filepath.Join(root, "workspace", "tmp", "slack", "attachments") {
-		t.Fatalf("SlackAttachmentsRoot = %q, want %q", cfg.SlackAttachmentsRoot, filepath.Join(root, "workspace", "tmp", "slack", "attachments"))
-	}
+	assertSamePath(t, cfg.WorkspaceDir, workspace)
+	assertSamePath(t, cfg.DBPath, filepath.Join(root, "goated.db"))
+	assertSamePath(t, cfg.LogDir, filepath.Join(root, "logs"))
+	assertSamePath(t, cfg.SlackAttachmentsRoot, filepath.Join(root, "workspace", "tmp", "slack", "attachments"))
 }
 
 func TestEnsureLocalBinPathsPrependsExistingDirs(t *testing.T) {
@@ -210,4 +202,52 @@ func mustWriteFile(t *testing.T, path string) {
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func assertSamePath(t *testing.T, got, want string) {
+	t.Helper()
+
+	gotEval, err := evalPathWithMissingLeaf(got)
+	if err != nil {
+		t.Fatalf("evalPathWithMissingLeaf(%q): %v", got, err)
+	}
+	wantEval, err := evalPathWithMissingLeaf(want)
+	if err != nil {
+		t.Fatalf("evalPathWithMissingLeaf(%q): %v", want, err)
+	}
+	if gotEval != wantEval {
+		t.Fatalf("path = %q (%q), want %q (%q)", got, gotEval, want, wantEval)
+	}
+}
+
+func evalPathWithMissingLeaf(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+
+	parent := absPath
+	var tail []string
+	for {
+		if _, err := os.Stat(parent); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+
+		dir, base := filepath.Dir(parent), filepath.Base(parent)
+		if dir == parent {
+			break
+		}
+		tail = append([]string{base}, tail...)
+		parent = dir
+	}
+
+	parentEval, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", err
+	}
+
+	parts := append([]string{parentEval}, tail...)
+	return filepath.Join(parts...), nil
 }
