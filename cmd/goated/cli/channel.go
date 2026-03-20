@@ -186,7 +186,7 @@ func promptChannel(reader *bufio.Reader) (*db.Channel, error) {
 		fmt.Println("  https://core.telegram.org/bots#botfather")
 		fmt.Println()
 
-		token := prompt(reader, "Telegram bot token", "")
+		token := promptSecret(reader, "Telegram bot token")
 		if token == "" {
 			return nil, fmt.Errorf("telegram bot token is required")
 		}
@@ -224,13 +224,13 @@ func promptChannel(reader *bufio.Reader) (*db.Channel, error) {
 		fmt.Println("     → View channel details → copy the ID at the bottom")
 		fmt.Println()
 
-		botToken := prompt(reader, "Slack bot token (xoxb-...)", "")
+		botToken := promptSecret(reader, "Slack bot token (xoxb-...)")
 		if botToken == "" {
 			return nil, fmt.Errorf("slack bot token is required")
 		}
 		config["bot_token"] = botToken
 
-		appToken := prompt(reader, "Slack app token (xapp-...)", "")
+		appToken := promptSecret(reader, "Slack app token (xapp-...)")
 		if appToken == "" {
 			return nil, fmt.Errorf("slack app token is required")
 		}
