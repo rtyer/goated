@@ -107,7 +107,8 @@ Use Goated cron for all recurring work. Do **not** use Codex or Claude Code buil
 
 ```sh
 ./goat session status                        # Health, busy state, context estimate
-./goat session restart                       # Kill and restart the active runtime tmux session
+./goat session restart                       # Restart the active session and preserve conversation when supported
+./goat session restart --clear               # Discard prior conversation and start fresh
 ./goat session send /context                 # Send a slash command or text to the active runtime
 ./goat session send "What are you working on?"
 ```

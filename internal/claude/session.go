@@ -413,10 +413,6 @@ func (r *SessionRuntime) StopSession(ctx context.Context) error {
 			}
 		}
 	}
-
-	// Delete session ID file
-	_ = os.Remove(r.sessionIDPath())
-
 	return nil
 }
 

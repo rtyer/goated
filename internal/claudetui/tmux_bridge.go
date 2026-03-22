@@ -2,6 +2,7 @@ package claudetui
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -97,6 +98,9 @@ func (b *TmuxBridge) EnsureSession(ctx context.Context) error {
 	if err := os.MkdirAll(b.WorkspaceDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir workspace dir: %w", err)
 	}
+	if err := os.MkdirAll(b.sessionDir(), 0o755); err != nil {
+		return fmt.Errorf("mkdir session dir: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Join(b.LogDir, "telegram"), 0o755); err != nil {
 		return fmt.Errorf("mkdir log dir: %w", err)
 	}
@@ -104,15 +108,27 @@ func (b *TmuxBridge) EnsureSession(ctx context.Context) error {
 	session := b.sessionName()
 	created := false
 	if !tmux.SessionExistsFor(ctx, session) {
-		cmd := fmt.Sprintf("cd %q && unset CLAUDECODE && export LOG_CALLER=main-session && claude --dangerously-skip-permissions", b.WorkspaceDir)
-		if err := tmux.Run(ctx, "new-session", "-d", "-s", session, cmd); err != nil {
-			return fmt.Errorf("start claude tmux session: %w", err)
+		sessionID := b.readSessionID()
+		resume := sessionID != ""
+		if sessionID == "" {
+			sessionID = newSessionID()
+			if err := b.writeSessionID(sessionID); err != nil {
+				return fmt.Errorf("save session ID: %w", err)
+			}
+		}
+		if err := b.startSession(ctx, session, sessionID, resume); err != nil {
+			return err
 		}
 		created = true
 	}
 	if created {
 		if err := waitForClaudeReadyFor(ctx, session, 25*time.Second); err != nil {
-			return err
+			if fallbackErr := b.restartFreshSession(ctx, session); fallbackErr != nil {
+				return err
+			}
+			if err := waitForClaudeReadyFor(ctx, session, 25*time.Second); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -124,6 +140,7 @@ func (b *TmuxBridge) ClearSession(ctx context.Context, _ string) error {
 }
 
 func (b *TmuxBridge) ResetConversation(ctx context.Context, _ string) (agent.ResetResult, error) {
+	_ = os.Remove(b.sessionIDPath())
 	if err := b.StopSession(ctx); err != nil {
 		return agent.ResetResult{}, err
 	}
@@ -134,6 +151,49 @@ func (b *TmuxBridge) ResetConversation(ctx context.Context, _ string) (agent.Res
 		Scope:   agent.ResetScopeHard,
 		Summary: "Started a fresh Claude Code session.",
 	}, nil
+}
+
+func (b *TmuxBridge) sessionDir() string {
+	return filepath.Join(b.LogDir, "claude_session")
+}
+
+func (b *TmuxBridge) sessionIDPath() string {
+	return filepath.Join(b.sessionDir(), "session_id")
+}
+
+func (b *TmuxBridge) readSessionID() string {
+	data, err := os.ReadFile(b.sessionIDPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func (b *TmuxBridge) writeSessionID(id string) error {
+	return os.WriteFile(b.sessionIDPath(), []byte(id+"\n"), 0o644)
+}
+
+func (b *TmuxBridge) startSession(ctx context.Context, session, sessionID string, resume bool) error {
+	args := []string{"claude", "--dangerously-skip-permissions"}
+	if resume {
+		args = append(args, "--resume", sessionID)
+	} else {
+		args = append(args, "--session-id", sessionID)
+	}
+	cmd := fmt.Sprintf("cd %q && unset CLAUDECODE && export LOG_CALLER=main-session && %s", b.WorkspaceDir, shellQuoteArgs(args))
+	if err := tmux.Run(ctx, "new-session", "-d", "-s", session, cmd); err != nil {
+		return fmt.Errorf("start claude tmux session: %w", err)
+	}
+	return nil
+}
+
+func (b *TmuxBridge) restartFreshSession(ctx context.Context, session string) error {
+	_ = tmux.Run(ctx, "kill-session", "-t", session)
+	sessionID := newSessionID()
+	if err := b.writeSessionID(sessionID); err != nil {
+		return fmt.Errorf("save session ID: %w", err)
+	}
+	return b.startSession(ctx, session, sessionID, false)
 }
 
 // ContextUsagePercent pastes /context into the Claude Code session and parses
@@ -412,7 +472,7 @@ func waitForClaudeReadyFor(ctx context.Context, session string, timeout time.Dur
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
-			if strings.Contains(out, "Claude Code") && strings.Contains(out, "❯") {
+			if tmux.HasPrompt(out) {
 				return nil
 			}
 		}
@@ -445,4 +505,27 @@ func lastLines(s string, n int) string {
 		start = len(lines) - n
 	}
 	return strings.Join(lines[start:], "\n")
+}
+
+func newSessionID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		now := uint64(time.Now().UnixNano())
+		for i := 0; i < 8; i++ {
+			b[i] = byte(now >> (8 * (7 - i)))
+			b[8+i] = byte(now >> (8 * i))
+		}
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+func shellQuoteArgs(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, fmt.Sprintf("%q", arg))
+	}
+	return strings.Join(quoted, " ")
 }

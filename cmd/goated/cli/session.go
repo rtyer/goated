@@ -26,7 +26,7 @@ var sessionCmd = &cobra.Command{
 
 var sessionRestartCmd = &cobra.Command{
 	Use:   "restart",
-	Short: "Kill and restart the active agent runtime session",
+	Short: "Restart the active agent runtime session",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runtime, err := makeRuntime()
 		if err != nil {
@@ -35,14 +35,29 @@ var sessionRestartCmd = &cobra.Command{
 		session := runtime.Session()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		clearSession, _ := cmd.Flags().GetBool("clear")
 
-		fmt.Fprintln(os.Stderr, "Killing existing session...")
+		if clearSession {
+			fmt.Fprintln(os.Stderr, "Clearing existing session...")
+		} else {
+			fmt.Fprintln(os.Stderr, "Restarting session without clearing conversation...")
+		}
 		if err := session.StopSession(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		}
 		time.Sleep(2 * time.Second)
 
-		fmt.Fprintln(os.Stderr, "Starting fresh session...")
+		if clearSession {
+			if _, err := session.ResetConversation(ctx, ""); err != nil {
+				return fmt.Errorf("failed to clear session: %w", err)
+			}
+		}
+
+		if clearSession {
+			fmt.Fprintln(os.Stderr, "Starting fresh session...")
+		} else {
+			fmt.Fprintln(os.Stderr, "Starting resumed session...")
+		}
 		if err := session.EnsureSession(ctx); err != nil {
 			return fmt.Errorf("failed to start session: %w", err)
 		}
@@ -151,6 +166,7 @@ Examples:
 }
 
 func init() {
+	sessionRestartCmd.Flags().Bool("clear", false, "discard prior conversation and start fresh")
 	sessionCmd.AddCommand(sessionRestartCmd)
 	sessionCmd.AddCommand(sessionStatusCmd)
 	sessionCmd.AddCommand(sessionSendCmd)

@@ -308,7 +308,8 @@ The active runtime sends replies directly via `./goat send_user_message --chat <
 
 ```sh
 ./goated session status                     # Health, busy state, context estimate
-./goated session restart                    # Kill and restart the active runtime tmux session
+./goated session restart                    # Restart the active session and preserve conversation when supported
+./goated session restart --clear            # Discard prior conversation and start fresh
 ./goated session send /context              # Send a slash command or text to the active runtime
 ./goated session send "What are you working on?"
 ```

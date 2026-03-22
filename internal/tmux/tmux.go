@@ -65,6 +65,15 @@ func PasteAndEnterFor(ctx context.Context, session, text string) error {
 	if err := run(ctx, "send-keys", "-t", targetForSession(session), "Enter"); err != nil {
 		return fmt.Errorf("send enter: %w", err)
 	}
+
+	// Claude Code can sometimes collapse a bulk paste into a placeholder before
+	// it actually submits. Do one delayed check and press Enter again if needed.
+	time.Sleep(3 * time.Second)
+	if out, err := CaptureVisibleFor(ctx, session); err == nil && hasCollapsedPastePlaceholder(out) {
+		if err := run(ctx, "send-keys", "-t", targetForSession(session), "Enter"); err != nil {
+			return fmt.Errorf("send retry enter: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -195,6 +204,10 @@ func HasPrompt(paneOutput string) bool {
 		}
 	}
 	return false
+}
+
+func hasCollapsedPastePlaceholder(paneOutput string) bool {
+	return strings.Contains(paneOutput, "Pasted text")
 }
 
 // API/transport error patterns that indicate a failed request (retryable).
