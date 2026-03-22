@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -176,6 +177,15 @@ func ensureDefaultSelfCrons(store *db.Store, workspaceDir, timezone string) erro
 	return nil
 }
 
+func shouldInstallSystemDeps(repoRoot string) bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	cmd := exec.Command(filepath.Join(repoRoot, "scripts", "setup_machine.sh"), "can-install-system")
+	cmd.Dir = repoRoot
+	return cmd.Run() == nil
+}
+
 func runBootstrapPostSetup(repoRoot string) error {
 	cfg := app.LoadConfig()
 
@@ -184,12 +194,17 @@ func runBootstrapPostSetup(repoRoot string) error {
 	fmt.Println()
 	fmt.Println("[1/6] Installing system dependencies with scripts/setup_machine.sh install-system")
 	fmt.Println("Reason: bootstrap should leave behind a usable machine baseline, including tools like tmux and crontab used by Goated workflows.")
-	systemCmd := exec.Command(filepath.Join(repoRoot, "scripts", "setup_machine.sh"), "install-system")
-	systemCmd.Dir = repoRoot
-	systemCmd.Stdout = os.Stdout
-	systemCmd.Stderr = os.Stderr
-	if err := systemCmd.Run(); err != nil {
-		return fmt.Errorf("run setup_machine.sh install-system: %w", err)
+	if shouldInstallSystemDeps(repoRoot) {
+		systemCmd := exec.Command(filepath.Join(repoRoot, "scripts", "setup_machine.sh"), "install-system")
+		systemCmd.Dir = repoRoot
+		systemCmd.Stdout = os.Stdout
+		systemCmd.Stderr = os.Stderr
+		if err := systemCmd.Run(); err != nil {
+			return fmt.Errorf("run setup_machine.sh install-system: %w", err)
+		}
+	} else {
+		fmt.Println("Skipping install-system on this machine because scripts/setup_machine.sh only supports Ubuntu/Debian right now.")
+		fmt.Println("Next step: install tmux, cron/crontab, git, curl, and build tools manually (for example via Homebrew on macOS), then rerun scripts/setup_machine.sh doctor if needed.")
 	}
 
 	fmt.Println()
