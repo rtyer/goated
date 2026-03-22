@@ -26,15 +26,15 @@ func (h *HeadlessRuntime) Descriptor() agent.RuntimeDescriptor {
 func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agent.HeadlessRequest) (agent.HeadlessResult, error) {
 	workspaceDir := chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
 	opts := subagent.RunOpts{
-		WorkspaceDir: workspaceDir,
-		Prompt:       req.Prompt,
-		LogPath:      req.LogPath,
-		Source:       req.Source,
-		CronID:       req.CronID,
-		ChatID:       req.ChatID,
-		Silent:       req.Silent,
-		LogCaller:    req.LogCaller,
-		SessionName:  sessionname.ClaudeTUI(workspaceDir),
+		WorkspaceDir:      workspaceDir,
+		Prompt:            req.Prompt,
+		LogPath:           req.LogPath,
+		Source:            req.Source,
+		CronID:            req.CronID,
+		ChatID:            req.ChatID,
+		NotifyMainSession: req.NotifyMainSession,
+		LogCaller:         req.LogCaller,
+		SessionName:       sessionname.ClaudeTUI(workspaceDir),
 		Runtime: db.ExecutionRuntime{
 			Provider: "claude_tui",
 			Mode:     "headless_exec",
@@ -59,15 +59,15 @@ func (h *HeadlessRuntime) RunSync(ctx context.Context, store *db.Store, req agen
 func (h *HeadlessRuntime) RunBackground(store *db.Store, req agent.HeadlessRequest) (agent.HeadlessResult, error) {
 	workspaceDir := chooseWorkspace(req.WorkspaceDir, h.WorkspaceDir)
 	opts := subagent.RunOpts{
-		WorkspaceDir: workspaceDir,
-		Prompt:       req.Prompt,
-		LogPath:      req.LogPath,
-		Source:       req.Source,
-		CronID:       req.CronID,
-		ChatID:       req.ChatID,
-		Silent:       req.Silent,
-		LogCaller:    req.LogCaller,
-		SessionName:  sessionname.ClaudeTUI(workspaceDir),
+		WorkspaceDir:      workspaceDir,
+		Prompt:            req.Prompt,
+		LogPath:           req.LogPath,
+		Source:            req.Source,
+		CronID:            req.CronID,
+		ChatID:            req.ChatID,
+		NotifyMainSession: req.NotifyMainSession,
+		LogCaller:         req.LogCaller,
+		SessionName:       sessionname.ClaudeTUI(workspaceDir),
 		Runtime: db.ExecutionRuntime{
 			Provider: "claude_tui",
 			Mode:     "headless_exec",

@@ -129,14 +129,14 @@ type SystemNoticeSender interface {
 }
 
 type HeadlessRequest struct {
-	WorkspaceDir string
-	Prompt       string
-	LogPath      string
-	Source       string
-	CronID       uint64
-	ChatID       string
-	Silent       bool
-	LogCaller    string // e.g. "cron-7", "main-session", "cli"
+	WorkspaceDir      string
+	Prompt            string
+	LogPath           string
+	Source            string
+	CronID            uint64
+	ChatID            string
+	NotifyMainSession bool
+	LogCaller         string // e.g. "cron-7", "main-session", "cli"
 }
 
 type HeadlessResult struct {

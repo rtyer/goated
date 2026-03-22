@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -33,17 +34,54 @@ func (s *Store) Path() string {
 }
 
 type CronJob struct {
-	ID         uint64 `json:"id"`
-	Type       string `json:"type"` // "subagent" (default) or "system"
-	ChatID     string `json:"chat_id"`
-	Schedule   string `json:"schedule"`
-	Prompt     string `json:"prompt,omitempty"`
-	PromptFile string `json:"prompt_file,omitempty"`
-	Command    string `json:"command,omitempty"` // shell command for type="system"
-	Timezone   string `json:"timezone"`
-	Silent     bool   `json:"silent"`
-	Active     bool   `json:"active"`
-	CreatedAt  string `json:"created_at"`
+	ID                uint64 `json:"id"`
+	Type              string `json:"type"` // "subagent" (default) or "system"
+	NotifyUser        *bool  `json:"notify_user,omitempty"`
+	ChatID            string `json:"chat_id"`
+	NotifyMainSession *bool  `json:"notify_main_session,omitempty"`
+	Schedule          string `json:"schedule"`
+	Prompt            string `json:"prompt,omitempty"`
+	PromptFile        string `json:"prompt_file,omitempty"`
+	Command           string `json:"command,omitempty"` // shell command for type="system"
+	Timezone          string `json:"timezone"`
+	Silent            bool   `json:"silent,omitempty"` // legacy field, lazily migrated
+	Active            bool   `json:"active"`
+	CreatedAt         string `json:"created_at"`
+}
+
+func (j CronJob) EffectiveNotifyUser() bool {
+	if j.NotifyUser != nil {
+		return *j.NotifyUser
+	}
+	return strings.TrimSpace(j.ChatID) != "" && !j.Silent
+}
+
+func (j CronJob) EffectiveNotifyMainSession() bool {
+	if j.NotifyMainSession != nil {
+		return *j.NotifyMainSession
+	}
+	return !j.Silent
+}
+
+func (j *CronJob) normalizeNotificationFields() bool {
+	changed := false
+
+	if j.NotifyUser == nil {
+		v := strings.TrimSpace(j.ChatID) != "" && !j.Silent
+		j.NotifyUser = &v
+		changed = true
+	}
+	if j.NotifyMainSession == nil {
+		v := !j.Silent
+		j.NotifyMainSession = &v
+		changed = true
+	}
+	if !j.EffectiveNotifyUser() && strings.TrimSpace(j.ChatID) != "" {
+		j.ChatID = ""
+		changed = true
+	}
+
+	return changed
 }
 
 type CronRun struct {
@@ -122,8 +160,18 @@ func (s *Store) update(fn func(tx *bolt.Tx) error) error {
 }
 
 func (s *Store) AddCron(cronType, chatID, schedule, prompt, promptFile, command, timezone string, silent bool) (uint64, error) {
+	notifyUser := strings.TrimSpace(chatID) != "" && !silent
+	notifyMainSession := !silent
+	return s.AddCronWithNotifications(cronType, chatID, schedule, prompt, promptFile, command, timezone, notifyUser, notifyMainSession)
+}
+
+func (s *Store) AddCronWithNotifications(cronType, chatID, schedule, prompt, promptFile, command, timezone string, notifyUser, notifyMainSession bool) (uint64, error) {
 	if cronType == "" {
 		cronType = "subagent"
+	}
+	chatID = strings.TrimSpace(chatID)
+	if !notifyUser {
+		chatID = ""
 	}
 	switch cronType {
 	case "system":
@@ -143,17 +191,18 @@ func (s *Store) AddCron(cronType, chatID, schedule, prompt, promptFile, command,
 		seq, _ := b.NextSequence()
 		id = seq
 		job := CronJob{
-			ID:         id,
-			Type:       cronType,
-			ChatID:     chatID,
-			Schedule:   schedule,
-			Prompt:     prompt,
-			PromptFile: promptFile,
-			Command:    command,
-			Timezone:   timezone,
-			Silent:     silent,
-			Active:     true,
-			CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+			ID:                id,
+			Type:              cronType,
+			NotifyUser:        boolPtr(notifyUser),
+			ChatID:            chatID,
+			NotifyMainSession: boolPtr(notifyMainSession),
+			Schedule:          schedule,
+			Prompt:            prompt,
+			PromptFile:        promptFile,
+			Command:           command,
+			Timezone:          timezone,
+			Active:            true,
+			CreatedAt:         time.Now().UTC().Format(time.RFC3339),
 		}
 		data, err := json.Marshal(job)
 		if err != nil {
@@ -166,6 +215,7 @@ func (s *Store) AddCron(cronType, chatID, schedule, prompt, promptFile, command,
 
 func (s *Store) ActiveCrons() ([]CronJob, error) {
 	var jobs []CronJob
+	var dirty []CronJob
 	err := s.view(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cronsBucket)
 		return b.ForEach(func(k, v []byte) error {
@@ -173,12 +223,18 @@ func (s *Store) ActiveCrons() ([]CronJob, error) {
 			if err := json.Unmarshal(v, &job); err != nil {
 				return nil // skip corrupt entries
 			}
+			if job.normalizeNotificationFields() {
+				dirty = append(dirty, job)
+			}
 			if job.Active {
 				jobs = append(jobs, job)
 			}
 			return nil
 		})
 	})
+	if err == nil && len(dirty) > 0 {
+		_ = s.persistCronJobs(dirty)
+	}
 	return jobs, err
 }
 
@@ -226,6 +282,7 @@ func (s *Store) RecordCronRun(cronID uint64, runMinute, status, userMsg, jobLogP
 
 func (s *Store) AllCrons() ([]CronJob, error) {
 	var jobs []CronJob
+	var dirty []CronJob
 	err := s.view(func(tx *bolt.Tx) error {
 		b := tx.Bucket(cronsBucket)
 		return b.ForEach(func(k, v []byte) error {
@@ -233,10 +290,16 @@ func (s *Store) AllCrons() ([]CronJob, error) {
 			if err := json.Unmarshal(v, &job); err != nil {
 				return nil
 			}
+			if job.normalizeNotificationFields() {
+				dirty = append(dirty, job)
+			}
 			jobs = append(jobs, job)
 			return nil
 		})
 	})
+	if err == nil && len(dirty) > 0 {
+		_ = s.persistCronJobs(dirty)
+	}
 	return jobs, err
 }
 
@@ -248,10 +311,16 @@ func (s *Store) GetCron(id uint64) (*CronJob, error) {
 		if data == nil {
 			return fmt.Errorf("cron %d not found", id)
 		}
-		return json.Unmarshal(data, &job)
+		if err := json.Unmarshal(data, &job); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if job.normalizeNotificationFields() {
+		_ = s.persistCronJobs([]CronJob{job})
 	}
 	return &job, nil
 }
@@ -268,6 +337,7 @@ func (s *Store) SetCronActive(id uint64, active bool) error {
 		if err := json.Unmarshal(data, &job); err != nil {
 			return err
 		}
+		job.normalizeNotificationFields()
 		job.Active = active
 		updated, err := json.Marshal(job)
 		if err != nil {
@@ -288,6 +358,12 @@ func (s *Store) SetCronSilent(id uint64, silent bool) error {
 		var job CronJob
 		if err := json.Unmarshal(data, &job); err != nil {
 			return err
+		}
+		job.normalizeNotificationFields()
+		job.NotifyMainSession = boolPtr(!silent)
+		if silent {
+			job.NotifyUser = boolPtr(false)
+			job.ChatID = ""
 		}
 		job.Silent = silent
 		updated, err := json.Marshal(job)
@@ -310,6 +386,7 @@ func (s *Store) SetCronSchedule(id uint64, schedule string) error {
 		if err := json.Unmarshal(data, &job); err != nil {
 			return err
 		}
+		job.normalizeNotificationFields()
 		job.Schedule = schedule
 		updated, err := json.Marshal(job)
 		if err != nil {
@@ -331,6 +408,7 @@ func (s *Store) SetCronTimezone(id uint64, timezone string) error {
 		if err := json.Unmarshal(data, &job); err != nil {
 			return err
 		}
+		job.normalizeNotificationFields()
 		job.Timezone = timezone
 		updated, err := json.Marshal(job)
 		if err != nil {
@@ -338,6 +416,81 @@ func (s *Store) SetCronTimezone(id uint64, timezone string) error {
 		}
 		return b.Put(key, updated)
 	})
+}
+
+func (s *Store) SetCronNotifyUser(id uint64, notifyUser bool, chatID string) error {
+	return s.update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(cronsBucket)
+		key := itob(id)
+		data := b.Get(key)
+		if data == nil {
+			return fmt.Errorf("cron %d not found", id)
+		}
+		var job CronJob
+		if err := json.Unmarshal(data, &job); err != nil {
+			return err
+		}
+		job.normalizeNotificationFields()
+		job.NotifyUser = boolPtr(notifyUser)
+		if notifyUser {
+			job.ChatID = strings.TrimSpace(chatID)
+			if job.ChatID == "" {
+				return fmt.Errorf("chat_id is required when notify_user=true")
+			}
+		} else {
+			job.ChatID = ""
+		}
+		updated, err := json.Marshal(job)
+		if err != nil {
+			return err
+		}
+		return b.Put(key, updated)
+	})
+}
+
+func (s *Store) SetCronNotifyMainSession(id uint64, notify bool) error {
+	return s.update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(cronsBucket)
+		key := itob(id)
+		data := b.Get(key)
+		if data == nil {
+			return fmt.Errorf("cron %d not found", id)
+		}
+		var job CronJob
+		if err := json.Unmarshal(data, &job); err != nil {
+			return err
+		}
+		job.normalizeNotificationFields()
+		job.NotifyMainSession = boolPtr(notify)
+		updated, err := json.Marshal(job)
+		if err != nil {
+			return err
+		}
+		return b.Put(key, updated)
+	})
+}
+
+func (s *Store) persistCronJobs(jobs []CronJob) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	return s.update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(cronsBucket)
+		for _, job := range jobs {
+			data, err := json.Marshal(job)
+			if err != nil {
+				return err
+			}
+			if err := b.Put(itob(job.ID), data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func (s *Store) DeleteCron(id uint64) error {

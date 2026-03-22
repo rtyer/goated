@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -58,6 +59,8 @@ var (
 	cronAddCommand    string
 	cronAddTimezone   string
 	cronAddSilent     bool
+	cronAddNotifyUser bool
+	cronAddNotifyMain bool
 )
 
 var cronAddCmd = &cobra.Command{
@@ -72,9 +75,6 @@ var cronAddCmd = &cobra.Command{
 				return fmt.Errorf("--command is required for system crons")
 			}
 		} else {
-			if cronAddChat == "" {
-				return fmt.Errorf("--chat is required for subagent crons")
-			}
 			if cronAddPrompt == "" && cronAddPromptFile == "" {
 				return fmt.Errorf("either --prompt or --prompt-file is required")
 			}
@@ -91,6 +91,20 @@ var cronAddCmd = &cobra.Command{
 		if _, err := time.LoadLocation(tz); err != nil {
 			return fmt.Errorf("invalid IANA timezone %q: %w", tz, err)
 		}
+		notifyUserSet := cmd.Flags().Lookup("notify-user").Changed
+		notifyMainSessionSet := cmd.Flags().Lookup("notify-main-session").Changed
+		chatID := strings.TrimSpace(cronAddChat)
+		notifyUser := cronAddNotifyUser
+		if !notifyUserSet {
+			notifyUser = chatID != "" && !cronAddSilent
+		}
+		if notifyUser && chatID == "" {
+			return fmt.Errorf("--chat is required when --notify-user is true")
+		}
+		notifyMainSession := cronAddNotifyMain
+		if !notifyMainSessionSet {
+			notifyMainSession = !cronAddSilent
+		}
 
 		database, err := db.Open(cfg.DBPath)
 		if err != nil {
@@ -98,7 +112,7 @@ var cronAddCmd = &cobra.Command{
 		}
 		defer database.Close()
 
-		id, err := database.AddCron(cronAddType, cronAddChat, cronAddSchedule, cronAddPrompt, cronAddPromptFile, cronAddCommand, tz, cronAddSilent)
+		id, err := database.AddCronWithNotifications(cronAddType, chatID, cronAddSchedule, cronAddPrompt, cronAddPromptFile, cronAddCommand, tz, notifyUser, notifyMainSession)
 		if err != nil {
 			return err
 		}
@@ -144,9 +158,6 @@ var cronListCmd = &cobra.Command{
 			if !j.Active {
 				status = "disabled"
 			}
-			if j.Silent {
-				status += ",silent"
-			}
 			jobType := j.Type
 			if jobType == "" {
 				jobType = "subagent"
@@ -163,7 +174,17 @@ var cronListCmd = &cobra.Command{
 			} else {
 				detail = fmt.Sprintf("prompt=%q", j.Prompt)
 			}
-			fmt.Printf("#%d [%s] type=%s schedule=%q tz=%s chat=%s %s\n", j.ID, status, jobType, j.Schedule, tzDisplay, j.ChatID, detail)
+			fmt.Printf("#%d [%s] type=%s schedule=%q tz=%s notify_user=%t chat=%s notify_main_session=%t %s\n",
+				j.ID,
+				status,
+				jobType,
+				j.Schedule,
+				tzDisplay,
+				j.EffectiveNotifyUser(),
+				j.ChatID,
+				j.EffectiveNotifyMainSession(),
+				detail,
+			)
 		}
 		return nil
 	},
@@ -296,7 +317,7 @@ var cronSetTimezoneCmd = &cobra.Command{
 
 var cronSetSilentCmd = &cobra.Command{
 	Use:   "set-silent ID true|false",
-	Short: "Set whether a cron job suppresses success notifications",
+	Short: "Deprecated: map legacy silent semantics onto notify_user/notify_main_session",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := strconv.ParseUint(args[0], 10, 64)
@@ -322,18 +343,85 @@ var cronSetSilentCmd = &cobra.Command{
 	},
 }
 
+var cronSetNotifyUserCmd = &cobra.Command{
+	Use:   "set-notify-user ID true|false [CHAT_ID]",
+	Short: "Set whether a cron notifies the user; CHAT_ID is required when enabling",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) < 2 || len(args) > 3 {
+			return fmt.Errorf("accepts ID true|false [CHAT_ID]")
+		}
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseUint(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid ID: %w", err)
+		}
+		notifyUser, err := strconv.ParseBool(args[1])
+		if err != nil {
+			return fmt.Errorf("invalid bool %q: use true or false", args[1])
+		}
+		chatID := ""
+		if len(args) == 3 {
+			chatID = args[2]
+		}
+		cfg := app.LoadConfig()
+		database, err := db.Open(cfg.DBPath)
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		if err := database.SetCronNotifyUser(id, notifyUser, chatID); err != nil {
+			return err
+		}
+		fmt.Printf("Set cron %d notify_user=%v chat=%s\n", id, notifyUser, chatID)
+		return nil
+	},
+}
+
+var cronSetNotifyMainSessionCmd = &cobra.Command{
+	Use:   "set-notify-main-session ID true|false",
+	Short: "Set whether a cron sends internal notices to the main session",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseUint(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid ID: %w", err)
+		}
+		notifyMainSession, err := strconv.ParseBool(args[1])
+		if err != nil {
+			return fmt.Errorf("invalid bool %q: use true or false", args[1])
+		}
+		cfg := app.LoadConfig()
+		database, err := db.Open(cfg.DBPath)
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+
+		if err := database.SetCronNotifyMainSession(id, notifyMainSession); err != nil {
+			return err
+		}
+		fmt.Printf("Set cron %d notify_main_session=%v\n", id, notifyMainSession)
+		return nil
+	},
+}
+
 func init() {
 	cronAddCmd.Flags().StringVar(&cronAddType, "type", "subagent", "Cron type: subagent or system")
-	cronAddCmd.Flags().StringVar(&cronAddChat, "chat", "", "Chat ID for notifications")
+	cronAddCmd.Flags().StringVar(&cronAddChat, "chat", "", "Chat ID for user notifications; leave blank if not notifying the user")
 	cronAddCmd.Flags().StringVar(&cronAddSchedule, "schedule", "", "Cron schedule (5-field)")
 	cronAddCmd.Flags().StringVar(&cronAddPrompt, "prompt", "", "Inline prompt to execute (subagent)")
 	cronAddCmd.Flags().StringVar(&cronAddPromptFile, "prompt-file", "", "Path to a prompt file (subagent)")
 	cronAddCmd.Flags().StringVar(&cronAddCommand, "command", "", "Shell command to run (system)")
 	cronAddCmd.Flags().StringVar(&cronAddTimezone, "timezone", "", "IANA timezone (e.g. UTC, America/Los_Angeles). Defaults to GOAT_DEFAULT_TIMEZONE.")
-	cronAddCmd.Flags().BoolVar(&cronAddSilent, "silent", false, "Suppress success notifications to the main session")
+	cronAddCmd.Flags().BoolVar(&cronAddSilent, "silent", false, "Deprecated legacy shorthand: disable both user and main-session success notifications")
+	cronAddCmd.Flags().BoolVar(&cronAddNotifyUser, "notify-user", false, "Notify the user directly for this cron")
+	cronAddCmd.Flags().BoolVar(&cronAddNotifyMain, "notify-main-session", true, "Send internal notices to the main interactive session")
 
 	cronListCmd.Flags().StringVar(&cronListChat, "chat", "", "Filter by chat ID (optional)")
 
-	cronCmd.AddCommand(cronRunCmd, cronAddCmd, cronListCmd, cronEnableCmd, cronDisableCmd, cronRemoveCmd, cronSetScheduleCmd, cronSetTimezoneCmd, cronSetSilentCmd)
+	cronCmd.AddCommand(cronRunCmd, cronAddCmd, cronListCmd, cronEnableCmd, cronDisableCmd, cronRemoveCmd, cronSetScheduleCmd, cronSetTimezoneCmd, cronSetSilentCmd, cronSetNotifyUserCmd, cronSetNotifyMainSessionCmd)
 	rootCmd.AddCommand(cronCmd)
 }

@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,47 +34,88 @@ func BuildPreamble(extra string) string {
 	return basePreamble + "\n\n" + extra
 }
 
+type BuildPromptOpts struct {
+	ChatID  string
+	Source  string
+	LogPath string
+	Cron    *db.CronJob
+}
+
 // BuildPrompt constructs the prompt for a headless subagent.
 // preamble is an optional prefix (e.g. "Read CRON.md before executing.").
-// chatID, if non-empty, adds send_user_message instructions.
-// source and logPath are passed through so the main session gets context.
-func BuildPrompt(preamble, userPrompt, chatID, source, logPath string) string {
+// opts carries optional runtime-specific execution context.
+func BuildPrompt(preamble, userPrompt string, opts BuildPromptOpts) string {
 	var b strings.Builder
 	if preamble != "" {
 		b.WriteString(preamble)
 		b.WriteString("\n\n")
 	}
+	if opts.Cron != nil {
+		b.WriteString(buildCronContextBlock(*opts.Cron))
+		b.WriteString("\n\n")
+	}
 	b.WriteString(strings.TrimSpace(userPrompt))
 	b.WriteString("\n")
-	if chatID != "" {
+	if opts.ChatID != "" {
 		b.WriteString("\nSend your response to the user by piping markdown into:\n")
-		sendCmd := fmt.Sprintf("  ./goat send_user_message --chat %s", chatID)
-		if source != "" {
-			sendCmd += fmt.Sprintf(" --source %s", source)
+		sendCmd := fmt.Sprintf("  ./goat send_user_message --chat %s", opts.ChatID)
+		if opts.Source != "" {
+			sendCmd += fmt.Sprintf(" --source %s", opts.Source)
 		}
-		if logPath != "" {
-			sendCmd += fmt.Sprintf(" --log %s", logPath)
+		if opts.LogPath != "" {
+			sendCmd += fmt.Sprintf(" --log %s", opts.LogPath)
 		}
 		b.WriteString(sendCmd + "\n")
-		b.WriteString("Keep any provided --source/--log flags intact so the main session receives a no-op system notice for context.\n")
+		b.WriteString("Keep any provided --source/--log flags intact so background execution stays properly correlated.\n")
 		b.WriteString("\nSee GOATED_CLI_README.md for formatting details.\n")
 	}
 	return b.String()
 }
 
+func buildCronContextBlock(job db.CronJob) string {
+	payload := struct {
+		CurrentTime string `json:"current_time"`
+		Schedule    string `json:"schedule"`
+		Timezone    string `json:"timezone"`
+		NotifyUser  bool   `json:"notify_user"`
+		ChatID      string `json:"chat_id"`
+		PromptFile  string `json:"prompt_file,omitempty"`
+	}{
+		CurrentTime: currentTimeIn(job.Timezone),
+		Schedule:    job.Schedule,
+		Timezone:    job.Timezone,
+		NotifyUser:  job.EffectiveNotifyUser(),
+		ChatID:      job.ChatID,
+		PromptFile:  job.PromptFile,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "Cron execution context: (unavailable)"
+	}
+	return "Cron execution context (authoritative):\n```json\n" + string(data) + "\n```"
+}
+
+func currentTimeIn(timezone string) string {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	return time.Now().In(loc).Format(time.RFC3339)
+}
+
 // RunOpts configures a subagent run.
 type RunOpts struct {
-	WorkspaceDir string
-	Prompt       string
-	LogPath      string
-	Source       string // "cron", "cli", "gateway"
-	CronID       uint64 // only for cron-sourced runs
-	ChatID       string
-	Silent       bool // suppress success notifications to main session
-	SessionName  string
-	Model        string // claude CLI --model value; empty means default
-	Runtime      db.ExecutionRuntime
-	LogCaller    string // propagated as LOG_CALLER env var to child process
+	WorkspaceDir      string
+	Prompt            string
+	LogPath           string
+	Source            string // "cron", "cli", "gateway"
+	CronID            uint64 // only for cron-sourced runs
+	ChatID            string
+	NotifyMainSession bool
+	SessionName       string
+	Model             string // claude CLI --model value; empty means default
+	Runtime           db.ExecutionRuntime
+	LogCaller         string // propagated as LOG_CALLER env var to child process
 }
 
 type Result struct {
@@ -95,17 +137,16 @@ func HandleCompletion(store *db.Store, runID uint64, runErr error, opts RunOpts)
 	if store != nil && runID > 0 {
 		_ = store.RecordSubagentFinish(runID, status)
 	}
-	// Silent crons skip notification on success; errors always notify.
-	if opts.Silent && status == "ok" {
+	if !opts.NotifyMainSession && status == "ok" {
 		return
 	}
-	notifyMainSession(opts, status)
+	NotifyMainSession(opts, status)
 }
 
-// notifyMainSession pastes a no-op system notice envelope into the configured
+// NotifyMainSession pastes a no-op system notice envelope into the configured
 // tmux session so the main interactive runtime has context about background
 // work without being prompted to reply.
-func notifyMainSession(opts RunOpts, status string) {
+func NotifyMainSession(opts RunOpts, status string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

@@ -103,6 +103,12 @@ const cronJobTimeout = 1 * time.Hour
 
 func (r *Runner) runOne(ctx context.Context, nowMinute time.Time, job db.CronJob) (runRecord, error) {
 	runMinute := nowMinute.Format(time.RFC3339)
+	notifyUser := job.EffectiveNotifyUser()
+	notifyMainSession := job.EffectiveNotifyMainSession()
+	chatID := strings.TrimSpace(job.ChatID)
+	if !notifyUser {
+		chatID = ""
+	}
 	runtimeMeta := db.ExecutionRuntime{}
 	if r.Headless != nil {
 		version := r.Headless.Version(context.Background())
@@ -128,6 +134,15 @@ func (r *Runner) runOne(ctx context.Context, nowMinute time.Time, job db.CronJob
 	)
 	if job.Type == "system" {
 		status = r.runSystem(jobCtx, job, jobLog)
+		if notifyMainSession {
+			subagent.NotifyMainSession(subagent.RunOpts{
+				LogPath:           jobLog,
+				Source:            "cron",
+				CronID:            job.ID,
+				NotifyMainSession: true,
+				SessionName:       "",
+			}, status)
+		}
 	} else {
 		status, result = r.runSubagent(jobCtx, job, jobLog)
 	}
@@ -143,15 +158,15 @@ func (r *Runner) runOne(ctx context.Context, nowMinute time.Time, job db.CronJob
 		return runRecord{}, fmt.Errorf("update cron run: %w", err)
 	}
 
-	if status == "error" && r.Notifier != nil && job.ChatID != "" {
+	if status == "error" && r.Notifier != nil && notifyUser && chatID != "" {
 		errNotify := fmt.Sprintf("Cron job #%d failed. Check log: %s", job.ID, jobLog)
-		_ = r.Notifier.SendMessage(ctx, job.ChatID, errNotify)
+		_ = r.Notifier.SendMessage(ctx, chatID, errNotify)
 	}
 
 	return runRecord{
 		Minute:          runMinute,
 		CronID:          job.ID,
-		ChatID:          job.ChatID,
+		ChatID:          chatID,
 		Schedule:        job.Schedule,
 		Status:          status,
 		JobLogPath:      jobLog,
@@ -180,20 +195,25 @@ func (r *Runner) runSubagent(ctx context.Context, job db.CronJob, jobLog string)
 		return "error", agent.HeadlessResult{}
 	}
 
-	promptChatID := job.ChatID
-	if job.Silent {
-		promptChatID = ""
+	promptChatID := ""
+	if job.EffectiveNotifyUser() {
+		promptChatID = strings.TrimSpace(job.ChatID)
 	}
-	prompt := subagent.BuildPrompt(subagent.BuildPreamble("Read CRON.md before executing."), userPrompt, promptChatID, "cron", jobLog)
+	prompt := subagent.BuildPrompt(subagent.BuildPreamble("Read CRON.md before executing."), userPrompt, subagent.BuildPromptOpts{
+		ChatID:  promptChatID,
+		Source:  "cron",
+		LogPath: jobLog,
+		Cron:    &job,
+	})
 	result, err := r.Headless.RunSync(ctx, r.Store, agent.HeadlessRequest{
-		WorkspaceDir: r.WorkspaceDir,
-		Prompt:       prompt,
-		LogPath:      jobLog,
-		Source:       "cron",
-		CronID:       job.ID,
-		ChatID:       job.ChatID,
-		Silent:       job.Silent,
-		LogCaller:    fmt.Sprintf("cron-%d", job.ID),
+		WorkspaceDir:      r.WorkspaceDir,
+		Prompt:            prompt,
+		LogPath:           jobLog,
+		Source:            "cron",
+		CronID:            job.ID,
+		ChatID:            promptChatID,
+		NotifyMainSession: job.EffectiveNotifyMainSession(),
+		LogCaller:         fmt.Sprintf("cron-%d", job.ID),
 	})
 	if err != nil {
 		return "error", result

@@ -134,19 +134,22 @@ func ensureDefaultSelfCrons(store *db.Store, workspaceDir, timezone string) erro
 	selfDir := filepath.Join(workspaceDir, "self")
 
 	defaults := []struct {
-		schedule   string
-		promptFile string
-		label      string
+		schedule          string
+		promptFile        string
+		label             string
+		notifyMainSession bool
 	}{
 		{
-			schedule:   "0 * * * *",
-			promptFile: filepath.Join(selfDir, "HEARTBEAT.md"),
-			label:      "hourly heartbeat",
+			schedule:          "0 * * * *",
+			promptFile:        filepath.Join(selfDir, "HEARTBEAT.md"),
+			label:             "hourly heartbeat",
+			notifyMainSession: true,
 		},
 		{
-			schedule:   "0 */8 * * *",
-			promptFile: filepath.Join(selfDir, "prompts", "knowledge_extraction.md"),
-			label:      "knowledge extraction",
+			schedule:          "0 */8 * * *",
+			promptFile:        filepath.Join(selfDir, "prompts", "knowledge_extraction.md"),
+			label:             "knowledge extraction",
+			notifyMainSession: true,
 		},
 	}
 
@@ -167,7 +170,7 @@ func ensureDefaultSelfCrons(store *db.Store, workspaceDir, timezone string) erro
 			fmt.Printf("Default %s cron already exists.\n", def.label)
 			continue
 		}
-		if _, err := store.AddCron("subagent", "", def.schedule, "", def.promptFile, "", timezone, true); err != nil {
+		if _, err := store.AddCronWithNotifications("subagent", "", def.schedule, "", def.promptFile, "", timezone, false, def.notifyMainSession); err != nil {
 			return fmt.Errorf("add default %s cron: %w", def.label, err)
 		}
 		fmt.Printf("Added default %s cron.\n", def.label)

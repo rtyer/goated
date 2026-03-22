@@ -45,15 +45,20 @@ var spawnSubagentCmd = &cobra.Command{
 		}
 
 		logFile := filepath.Join(logDir, time.Now().Format("20060102-150405")+".log")
-		fullPrompt := subagent.BuildPrompt(subagent.BuildPreamble(""), prompt, chatID, "subagent", logFile)
+		fullPrompt := subagent.BuildPrompt(subagent.BuildPreamble(""), prompt, subagent.BuildPromptOpts{
+			ChatID:  chatID,
+			Source:  "subagent",
+			LogPath: logFile,
+		})
 
 		result, err := runtime.Headless().RunBackground(store, agent.HeadlessRequest{
-			WorkspaceDir: cfg.WorkspaceDir,
-			LogPath:      logFile,
-			Prompt:       fullPrompt,
-			Source:       "cli",
-			ChatID:       chatID,
-			LogCaller:    "cli",
+			WorkspaceDir:      cfg.WorkspaceDir,
+			LogPath:           logFile,
+			Prompt:            fullPrompt,
+			Source:            "cli",
+			ChatID:            chatID,
+			NotifyMainSession: true,
+			LogCaller:         "cli",
 		})
 		if err != nil {
 			return err

@@ -1,9 +1,12 @@
 package db
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -49,6 +52,12 @@ func TestCronAddAndGet(t *testing.T) {
 	}
 	if job.Type != "subagent" {
 		t.Errorf("Type = %q, want subagent", job.Type)
+	}
+	if !job.EffectiveNotifyUser() {
+		t.Error("expected notify_user=true")
+	}
+	if !job.EffectiveNotifyMainSession() {
+		t.Error("expected notify_main_session=true")
 	}
 }
 
@@ -141,6 +150,15 @@ func TestCronSetSilent(t *testing.T) {
 	if !job.Silent {
 		t.Error("expected Silent=true")
 	}
+	if job.EffectiveNotifyUser() {
+		t.Error("expected notify_user=false after silent=true")
+	}
+	if job.EffectiveNotifyMainSession() {
+		t.Error("expected notify_main_session=false after silent=true")
+	}
+	if job.ChatID != "" {
+		t.Errorf("expected ChatID to be cleared, got %q", job.ChatID)
+	}
 }
 
 func TestCronSetSchedule(t *testing.T) {
@@ -201,6 +219,47 @@ func TestGetCronNotFound(t *testing.T) {
 	_, err := s.GetCron(99999)
 	if err == nil {
 		t.Fatal("expected error for non-existent cron")
+	}
+}
+
+func TestCronLazyNotificationMigration(t *testing.T) {
+	s := newTestStore(t)
+
+	legacy := CronJob{
+		ID:        42,
+		Type:      "subagent",
+		ChatID:    "legacy-chat",
+		Schedule:  "* * * * *",
+		Prompt:    "legacy prompt",
+		Timezone:  "UTC",
+		Silent:    false,
+		Active:    true,
+		CreatedAt: "2026-03-22T00:00:00Z",
+	}
+
+	if err := s.update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(cronsBucket)
+		data, err := json.Marshal(legacy)
+		if err != nil {
+			return err
+		}
+		return b.Put(itob(legacy.ID), data)
+	}); err != nil {
+		t.Fatalf("seed legacy cron: %v", err)
+	}
+
+	job, err := s.GetCron(legacy.ID)
+	if err != nil {
+		t.Fatalf("GetCron: %v", err)
+	}
+	if !job.EffectiveNotifyUser() {
+		t.Error("expected notify_user=true after lazy migration")
+	}
+	if !job.EffectiveNotifyMainSession() {
+		t.Error("expected notify_main_session=true after lazy migration")
+	}
+	if job.NotifyUser == nil || job.NotifyMainSession == nil {
+		t.Fatal("expected notification fields to be persisted")
 	}
 }
 
