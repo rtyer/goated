@@ -44,6 +44,20 @@ state, archives) belongs in `self/`. The workspace root is the shared goated
 repo. If you build CLI tools, they MUST `chdir` to `self/` at startup; see
 `TOOLS.md` for the required pattern.
 
+Tooling boundaries:
+- Do not install ad hoc toolchains or package managers into the shared
+  `workspace/` root.
+- Do not create `workspace/package.json`, `workspace/package-lock.json`,
+  `workspace/node_modules`, `workspace/.venv`, `workspace/venv`, or similar
+  dependency directories in the shared repo.
+- Do not use `npm install`, `pnpm install`, `yarn`, or `pip install` in
+  `workspace/` unless the user explicitly asks to modify the shared workspace
+  itself.
+- If you need a new agent capability, prefer adding it as a Go tool under
+  `self/tools/` or extending the existing toolbox in `self/tools/toolbox-cli`.
+- If a non-Go dependency is truly necessary, keep it under `self/` in a
+  clearly scoped tool directory so it does not pollute the shared repo.
+
 Markdown file rules:
 - All markdown files in `self/` should start with YAML frontmatter using the
   `---` convention.

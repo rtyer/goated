@@ -12,12 +12,33 @@ All tools should be built in Go using [Cobra](https://github.com/spf13/cobra) fo
 - **Minimal dependencies** — the Go stdlib covers HTTP, JSON, file I/O, and concurrency. You rarely need external packages beyond Cobra.
 - **Fast startup** — Go binaries launch in milliseconds. No interpreter warmup, no JIT.
 
+This is the default and expected path for agent tooling. If the user asks for a
+new capability, build it in Go first unless there is a strong, concrete reason
+not to.
+
+## Workspace safety rules
+
+The shared `workspace/` root is not a scratch directory for package installs.
+
+- Do **not** create `workspace/package.json`, `workspace/package-lock.json`,
+  `workspace/node_modules`, `workspace/.venv`, `workspace/venv`, `.wrangler`,
+  or similar dependency/runtime directories in the shared repo.
+- Do **not** run `npm install`, `pnpm install`, `yarn`, `pip install`, or
+  comparable package-manager commands in `workspace/`.
+- Put agent-owned tools under `self/tools/`, preferably in Go, and keep their
+  state/output under `self/`.
+- If a non-Go dependency is unavoidable, isolate it under a dedicated
+  `self/tools/<toolname>/` directory with its own manifest and dependency tree.
+- If the task actually requires changing the shared workspace project itself,
+  do that only when the user explicitly asked for workspace/project changes.
+
 ## Project structure
 
-Create a Go module in your workspace. One module can produce one binary with many subcommands:
+Create a Go module under `self/tools/`. One module can produce one binary with
+many subcommands:
 
 ```
-tools/go/
+self/tools/go/
   go.mod              # module name, e.g. "agent-tools"
   go.sum
   cmd/mytool/
@@ -31,7 +52,7 @@ tools/go/
 
 Initialize with:
 ```bash
-cd tools/go
+cd self/tools/go
 go mod init agent-tools
 go get github.com/spf13/cobra
 ```
@@ -76,7 +97,7 @@ func helloCmd() *cobra.Command {
 
 Build and run:
 ```bash
-cd tools/go
+cd self/tools/go
 go build -o ../mytool ./cmd/mytool/
 ../mytool hello --name agent
 # Hello, agent!
