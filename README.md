@@ -85,8 +85,8 @@ For a detailed comparison of token usage, file sizes, and memory overhead vs. Op
 ```
 ┌──────────┐         ┌──────────────┐ prompt/paste ┌──────────────────────────┐
 │ Telegram │ ──────> │   Gateway    │ ───────────> │  Active Runtime          │
-│   User   │         │  (polling/   │              │  (headless or tmux)      │
-│          │ <────── │   webhook)   │ <──────────  │                          │
+│ or Slack │         │  (polling/   │              │  (headless or tmux)      │
+│   User   │ <────── │   webhook)   │ <──────────  │                          │
 └──────────┘         └──────────────┘  exec        └──────────────────────────┘
     ^                    │                           │            │
     │                    │                           │            │ ./goat spawn-subagent
