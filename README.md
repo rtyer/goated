@@ -29,7 +29,7 @@ Out of the box, Goated supports:
 
 ## Quickstart
 
-Goated works best on Linux, in a VM, a dedicated box, or a VPS.  The maintainer recommends a DigitalOcean droplet or EC2 Instance with 4GB memory.
+Goated works best on Linux (in a VM, a dedicated box, or a VPS).  The maintainer recommends a DigitalOcean droplet or EC2 Instance with 4GB memory.  You can run it on a Mac Mini if you want, but, like, buyer beware.  Goated uses YOLO mode and it ain't in a docker container.
 
 1. Clone the repo:
 
