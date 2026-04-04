@@ -4,7 +4,7 @@
 
 # goated
 
-Goated is an always-on personal AI assistant, built around the Claude Code and Codex harnesses. It's minimal, performant, and piggybacks on the best harnesses in the world for long-running sessions.
+Goated is an always-on personal AI assistant, built around Claude Code and Codex. It's minimal, performant, and piggybacks on the best harnesses in the world for long-running sessions.
 
 Out of the box, Goated supports:
 
