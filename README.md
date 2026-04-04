@@ -19,6 +19,7 @@ Out of the box, Goated supports:
 - Slack and Telegram chat interfaces
 - Claude Code and Codex in both headless and TUI modes
 - Long-running daemon operation with watchdog recovery
+- Obsessive, automatic Obsidian-style notetaking with the excellent `notesmd` CLI
 - Cron jobs and headless subagents
 - File-backed credential management
 - Session health checks, restart handling, and queueing
