@@ -6,7 +6,7 @@
 
 Goated is an always-on personal AI assistant, built around Claude Code and Codex. It's minimal, performant, and piggybacks on the best harnesses in the world for long-running sessions.
 
-Proud to be 100% golang, built with cobra + viper + bbolt.
+Written in golang, with cobra + viper + bbolt + tmux + crontab.
 
 **Why Goated vs. OpenClaw?**
 
