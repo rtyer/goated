@@ -380,16 +380,15 @@ func envExists(path string) bool {
 	return err == nil
 }
 
-// findEnvFile looks for a .env file in the same search paths LoadConfig uses.
-func findEnvFile(cwd, exeDir string) string {
-	candidates := []string{filepath.Join(cwd, ".env")}
-	if exeDir != "" {
-		candidates = append(candidates, filepath.Join(exeDir, ".env"), filepath.Join(exeDir, "..", ".env"))
-	}
-	for _, p := range candidates {
-		if envExists(p) {
-			return p
-		}
+// findEnvFile looks for a .env file to auto-migrate. Migration is destructive
+// (renames .env → .env.bak and writes goated.json next to it), so we only
+// consider .env in the current working directory — never walk up or use the
+// binary's install path, which would risk mutating unrelated files in parent
+// directories.
+func findEnvFile(cwd, _ string) string {
+	p := filepath.Join(cwd, ".env")
+	if envExists(p) {
+		return p
 	}
 	return ""
 }
