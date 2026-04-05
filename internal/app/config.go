@@ -72,6 +72,8 @@ type Config struct {
 	SlackAttachmentMaxParallel      int
 	DefaultTimezone                 string
 	AdminChatID                     string
+	PiProvider                      string // pi --provider value, e.g. "fireworks"
+	PiModel                         string // pi --model value, e.g. "accounts/fireworks/models/kimi-k2p5"
 }
 
 func LoadConfig() Config {
@@ -109,6 +111,8 @@ func LoadConfig() Config {
 	v.SetDefault("slack.attachment_max_bytes", int64(25*1024*1024))
 	v.SetDefault("slack.attachment_max_total_bytes", int64(251*1024*1024))
 	v.SetDefault("slack.attachment_max_parallel", 3)
+	v.SetDefault("pi.provider", "")
+	v.SetDefault("pi.model", "")
 
 	// Bind env vars so they override config file values
 	v.BindEnv("gateway", "GOAT_GATEWAY")
@@ -129,6 +133,8 @@ func LoadConfig() Config {
 	v.BindEnv("slack.attachment_max_bytes", "GOAT_SLACK_ATTACHMENT_MAX_BYTES")
 	v.BindEnv("slack.attachment_max_total_bytes", "GOAT_SLACK_ATTACHMENT_MAX_TOTAL_BYTES")
 	v.BindEnv("slack.attachment_max_parallel", "GOAT_SLACK_ATTACHMENT_MAX_PARALLEL")
+	v.BindEnv("pi.provider", "GOAT_PI_PROVIDER")
+	v.BindEnv("pi.model", "GOAT_PI_MODEL")
 
 	// Read config file (ignore not-found — defaults + env vars are fine)
 	readErr := v.ReadInConfig()
@@ -239,6 +245,8 @@ func LoadConfig() Config {
 		SlackAttachmentMaxParallel:      v.GetInt("slack.attachment_max_parallel"),
 		DefaultTimezone:                 v.GetString("default_timezone"),
 		AdminChatID:                     loadCred(credsDir, "GOAT_ADMIN_CHAT_ID"),
+		PiProvider:                      v.GetString("pi.provider"),
+		PiModel:                         v.GetString("pi.model"),
 	}
 }
 

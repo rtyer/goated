@@ -36,6 +36,13 @@ var bootstrapCmd = &cobra.Command{
 		if runtime != "claude" && runtime != "codex" && runtime != "pi" && runtime != "claude_tui" && runtime != "codex_tui" {
 			return fmt.Errorf("agent runtime must be claude, codex, pi, claude_tui, or codex_tui")
 		}
+		if runtime == "pi" {
+			fmt.Println()
+			fmt.Println("Pi runtime notes:")
+			fmt.Println("- Pi auth and custom provider config live under ~/.pi/agent/")
+			fmt.Println("- Bootstrap will create a Goated-managed Pi session and warm it up from GOATED.md")
+			fmt.Println("- The Pi runtime is headless-only and still considered in development")
+		}
 
 		cfg := app.LoadConfig()
 		store, err := db.Open(cfg.DBPath)
@@ -122,7 +129,7 @@ var bootstrapCmd = &cobra.Command{
 
 		fmt.Println()
 		repoRoot, _ := os.Getwd()
-		if err := runBootstrapPostSetup(repoRoot); err != nil {
+		if err := runBootstrapPostSetup(repoRoot, runtime); err != nil {
 			return err
 		}
 		fmt.Println()
@@ -189,7 +196,7 @@ func shouldInstallSystemDeps(repoRoot string) bool {
 	return cmd.Run() == nil
 }
 
-func runBootstrapPostSetup(repoRoot string) error {
+func runBootstrapPostSetup(repoRoot, agentRuntime string) error {
 	cfg := app.LoadConfig()
 
 	fmt.Println("Running post-bootstrap setup automatically so this workspace is immediately usable.")
@@ -256,8 +263,23 @@ func runBootstrapPostSetup(repoRoot string) error {
 		return fmt.Errorf("start daemon: %w", err)
 	}
 
-	fmt.Println()
-	fmt.Println("[6/6] Installing the watchdog cron")
+	if agentRuntime == "pi" {
+		fmt.Println()
+		fmt.Println("[6/7] Initializing the Pi runtime session")
+		fmt.Println("Reason: Pi uses a Goated-managed persisted session; bootstrap should warm it up from GOATED.md so the first real user message lands in an initialized session.")
+		runtimeCmd := exec.Command(goatedBin, "runtime", "status")
+		runtimeCmd.Dir = repoRoot
+		runtimeCmd.Stdout = os.Stdout
+		runtimeCmd.Stderr = os.Stderr
+		if err := runtimeCmd.Run(); err != nil {
+			return fmt.Errorf("initialize pi runtime session: %w", err)
+		}
+		fmt.Println()
+		fmt.Println("[7/7] Installing the watchdog cron")
+	} else {
+		fmt.Println()
+		fmt.Println("[6/6] Installing the watchdog cron")
+	}
 	fmt.Println("Reason: the watchdog restarts the daemon if it dies, so a fresh bootstrap should also make the service resilient.")
 	if err := installWatchdogCron(repoRoot); err != nil {
 		return err
