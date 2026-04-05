@@ -18,7 +18,7 @@ Out of the box, Goated supports:
 
 - Slack and Telegram chat interfaces
 - Claude Code and Codex in both headless and TUI modes
-- Pi in headless mode only, currently in development
+- Pi in headless mode
 - Long-running daemon operation with watchdog recovery
 - Obsessive, automatic Obsidian-style notetaking with the excellent `notesmd` CLI
 - Cron jobs and headless subagents
@@ -148,7 +148,7 @@ goated/
 │   ├── agent/                  # Provider-neutral runtime contracts
 │   ├── claude/                 # Claude headless runtime (claude -p --resume, hooks-based)
 │   ├── claudetui/              # Claude TUI runtime implementations (tmux-based)
-│   ├── pi/                     # Pi headless runtime (in development)
+│   ├── pi/                     # Pi headless runtime
 │   ├── codextui/               # Codex TUI runtime implementations (tmux-based)
 │   ├── cron/runner.go          # Cron scheduler (1min tick, dedup, 1hr timeout)
 │   ├── db/db.go                # bbolt store (open-per-op, no held locks)
@@ -355,7 +355,7 @@ The active runtime sends replies directly via `./goat send_user_message --chat <
 ./goated runtime status
 ./goated runtime switch claude          # headless Claude Code
 ./goated runtime switch codex           # headless Codex
-./goated runtime switch pi              # headless Pi (in development)
+./goated runtime switch pi              # headless Pi
 ./goated runtime switch claude_tui      # Claude Code in tmux
 ./goated runtime switch codex_tui       # Codex in tmux
 ./goated runtime cleanup
