@@ -86,6 +86,10 @@ var runtimeStatusCmd = &cobra.Command{
 				Provider:    agent.RuntimeCodex,
 				DisplayName: "Codex",
 			},
+			{
+				Provider:    agent.RuntimePi,
+				DisplayName: "Pi",
+			},
 		} {
 			marker := "inactive"
 			if desc.Provider == runtime.Descriptor().Provider {
@@ -119,13 +123,13 @@ var runtimeStatusCmd = &cobra.Command{
 }
 
 var runtimeSwitchCmd = &cobra.Command{
-	Use:   "switch <claude|codex|claude_tui|codex_tui>",
+	Use:   "switch <claude|codex|pi|claude_tui|codex_tui>",
 	Short: "Switch the configured agent runtime",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := args[0]
-		if target != string(agent.RuntimeClaude) && target != string(agent.RuntimeCodex) && target != string(agent.RuntimeClaudeTUI) && target != string(agent.RuntimeCodexTUI) {
-			return fmt.Errorf("runtime must be claude, codex, claude_tui, or codex_tui")
+		if target != string(agent.RuntimeClaude) && target != string(agent.RuntimeCodex) && target != string(agent.RuntimePi) && target != string(agent.RuntimeClaudeTUI) && target != string(agent.RuntimeCodexTUI) {
+			return fmt.Errorf("runtime must be claude, codex, pi, claude_tui, or codex_tui")
 		}
 
 		configPath := "goated.json"
@@ -178,6 +182,8 @@ func sessionNameForRuntime(runtime string, workspaceDir string) string {
 		return "goat_claude_main"
 	case string(agent.RuntimeCodex):
 		return sessionname.Codex(workspaceDir)
+	case string(agent.RuntimePi):
+		return ""
 	case string(agent.RuntimeCodexTUI):
 		return sessionname.CodexTUI(workspaceDir)
 	default:

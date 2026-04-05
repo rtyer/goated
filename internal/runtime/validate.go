@@ -21,6 +21,10 @@ func Validate(ctx context.Context, rt agent.Runtime, workspaceDir string) error 
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex binary not found on PATH: %w", err)
 		}
+	case agent.RuntimePi:
+		if _, err := exec.LookPath("pi"); err != nil {
+			return fmt.Errorf("pi binary not found on PATH: %w", err)
+		}
 	}
 
 	// Tmux and workspace validation only for interactive (TUI) runtimes

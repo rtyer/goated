@@ -12,6 +12,7 @@ type RuntimeProvider string
 const (
 	RuntimeClaude    RuntimeProvider = "claude"
 	RuntimeCodex     RuntimeProvider = "codex"
+	RuntimePi        RuntimeProvider = "pi"
 	RuntimeClaudeTUI RuntimeProvider = "claude_tui"
 	RuntimeCodexTUI  RuntimeProvider = "codex_tui"
 )

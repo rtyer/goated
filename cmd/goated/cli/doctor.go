@@ -97,7 +97,7 @@ func checkConfigFile() checkResult {
 
 func checkRuntimeValue(runtime string) checkResult {
 	switch agent.RuntimeProvider(runtime) {
-	case "", agent.RuntimeClaude, agent.RuntimeCodex, agent.RuntimeClaudeTUI, agent.RuntimeCodexTUI:
+	case "", agent.RuntimeClaude, agent.RuntimeCodex, agent.RuntimePi, agent.RuntimeClaudeTUI, agent.RuntimeCodexTUI:
 		display := runtime
 		if display == "" {
 			display = "(empty, defaults to claude)"
@@ -112,7 +112,7 @@ func checkRuntimeValue(runtime string) checkResult {
 			Name:    "agent_runtime",
 			OK:      false,
 			Detail:  fmt.Sprintf("unknown value %q", runtime),
-			FixHint: "Valid values: claude, codex, claude_tui, codex_tui. Update goated.json or run: ./goated bootstrap",
+			FixHint: "Valid values: claude, codex, pi, claude_tui, codex_tui. Update goated.json or run: ./goated bootstrap",
 		}
 	}
 }
@@ -124,6 +124,8 @@ func checkRuntimeBinary(runtime string) checkResult {
 		binary = "claude"
 	case agent.RuntimeCodex, agent.RuntimeCodexTUI:
 		binary = "codex"
+	case agent.RuntimePi:
+		binary = "pi"
 	default:
 		return checkResult{
 			Name:   "runtime binary",
@@ -137,6 +139,8 @@ func checkRuntimeBinary(runtime string) checkResult {
 		hint := fmt.Sprintf("Install %s and ensure it's on your PATH", binary)
 		if binary == "claude" {
 			hint = "Install Claude Code: npm install -g @anthropic-ai/claude-code"
+		} else if binary == "pi" {
+			hint = "Install Pi and ensure 'pi' is on your PATH"
 		}
 		return checkResult{
 			Name:    fmt.Sprintf("%s binary", binary),

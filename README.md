@@ -8,16 +8,19 @@ Goated is an always-on personal AI assistant, built around Claude Code and Codex
 
 Written in golang, with cobra + viper + bbolt + tmux + crontab.
 
+`pi` runtime support is in development and not thoroughly tested yet.
+
 **Why Goated vs. OpenClaw?**
 
 Well, besides the fact that many (most?) OpenClaw users are violating Claude Code's TOS by hijacking their Max credentials: Goated is also simply faster, smaller, and _much_ more performant.
 
-This is because most agent frameworks own the context window — they inject bootstrap files, manage session history, and accumulate state in-process until memory explodes. Goated doesn't touch the context window at all. It's a ~20 MB daemon that pastes message envelopes into tmux and lets Claude Code (or Codex) handle its own context compaction, memory, and token budgeting. The result: no token bloat, no session file growth, no multi-GB memory leaks. Just a thin orchestrator that stays out of the way. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the full comparison.
+This is because most agent frameworks own the context window — they inject bootstrap files, manage session history, and accumulate state in-process until memory explodes. Goated doesn't touch the context window at all. It's a ~20 MB daemon that pastes message envelopes into tmux and lets Claude Code, Codex, or Pi handle its own context compaction, memory, and token budgeting. The result: no token bloat, no session file growth, no multi-GB memory leaks. Just a thin orchestrator that stays out of the way. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the full comparison.
 
 Out of the box, Goated supports:
 
 - Slack and Telegram chat interfaces
 - Claude Code and Codex in both headless and TUI modes
+- Pi in headless mode only, currently in development
 - Long-running daemon operation with watchdog recovery
 - Obsessive, automatic Obsidian-style notetaking with the excellent `notesmd` CLI
 - Cron jobs and headless subagents
@@ -63,7 +66,7 @@ git push -u origin main
 
 - **Go matching `go.mod`** — all binaries are compiled from this repo
 - **tmux** — hosts the persistent interactive runtime session (only needed for TUI runtimes)
-- **One agent runtime CLI** — `claude` for Claude Code or `codex` for Codex
+- **One agent runtime CLI** — `claude` for Claude Code, `codex` for Codex, or `pi` for Pi
 - **Telegram Bot API** — user-facing interface (bot token from [@BotFather](https://t.me/BotFather))
 - **bbolt** — embedded key-value database (no external DB server)
 
@@ -118,7 +121,9 @@ Both the **cron runner** and the **active runtime session** can spawn subagents.
 
 **Key design choice:** the runtime sends its own replies. The gateway doesn't scrape output from tmux — instead, the runtime is instructed through the workspace contract to pipe its response through the `goat` CLI. This makes the system stateless on the response path and avoids fragile scrollback parsing.
 
-**Headless runtimes** use process-per-message execution: `claude` uses `claude -p --resume`, and `codex` uses `codex exec` with `codex exec resume` for follow-up turns. **TUI runtimes** (`claude_tui`, `codex_tui`) run inside tmux. Subagents and cron jobs always run headlessly. Each run is tracked in bbolt with PID and status. The cron runner skips a job if its previous run is still in-flight, preventing pile-ups from long-running tasks.
+**Headless runtimes** use process-per-message execution: `claude` uses `claude -p --resume`, `codex` uses `codex exec` with `codex exec resume` for follow-up turns, and `pi` uses Pi's headless JSON/session modes. **TUI runtimes** (`claude_tui`, `codex_tui`) run inside tmux. Subagents and cron jobs always run headlessly. Each run is tracked in bbolt with PID and status. The cron runner skips a job if its previous run is still in-flight, preventing pile-ups from long-running tasks.
+
+`pi` support is in development and has not been thoroughly tested yet.
 
 ### Folder structure
 
@@ -147,6 +152,7 @@ goated/
 │   ├── agent/                  # Provider-neutral runtime contracts
 │   ├── claude/                 # Claude headless runtime (claude -p --resume, hooks-based)
 │   ├── claudetui/              # Claude TUI runtime implementations (tmux-based)
+│   ├── pi/                     # Pi headless runtime (in development)
 │   ├── codextui/               # Codex TUI runtime implementations (tmux-based)
 │   ├── cron/runner.go          # Cron scheduler (1min tick, dedup, 1hr timeout)
 │   ├── db/db.go                # bbolt store (open-per-op, no held locks)
@@ -235,6 +241,7 @@ to your identity, memory, and project files regularly.
 - One runtime CLI installed and authenticated:
   - Claude Code (`claude`) — used by both `claude` and `claude_tui` runtimes
   - Codex (`codex`) — used by both `codex` and `codex_tui` runtimes
+  - Pi (`pi`) — used by the `pi` runtime
 
 ### Machine bootstrap
 
@@ -288,7 +295,7 @@ Settings (`goated.json`):
 | Key                              | Default               | Description                                       |
 | -------------------------------- | --------------------- | ------------------------------------------------- |
 | `gateway`                        | `telegram`            | `slack` or `telegram`                             |
-| `agent_runtime`                  | `claude`              | `claude`, `codex`, `claude_tui`, or `codex_tui`   |
+| `agent_runtime`                  | `claude`              | `claude`, `codex`, `pi`, `claude_tui`, or `codex_tui`   |
 | `default_timezone`               | `America/Los_Angeles` | Timezone for cron schedules                       |
 | `workspace_dir`                  | `workspace`           | Agent working directory                           |
 | `db_path`                        | `./goated.db`         | Path to bbolt database                            |
@@ -346,6 +353,7 @@ The active runtime sends replies directly via `./goat send_user_message --chat <
 ./goated runtime status
 ./goated runtime switch claude          # headless Claude Code
 ./goated runtime switch codex           # headless Codex
+./goated runtime switch pi              # headless Pi (in development)
 ./goated runtime switch claude_tui      # Claude Code in tmux
 ./goated runtime switch codex_tui       # Codex in tmux
 ./goated runtime cleanup

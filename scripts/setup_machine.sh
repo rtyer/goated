@@ -30,7 +30,7 @@ Commands:
 
 Notes:
   - Runtime CLIs are validated but not auto-installed here.
-  - Claude Code and Codex should be installed and authenticated separately.
+  - Claude Code, Codex, and Pi should be installed and authenticated separately.
 EOF
 }
 
@@ -160,6 +160,7 @@ doctor() {
   echo "Runtime CLIs"
   print_tool claude optional || true
   print_tool codex optional || true
+  print_tool pi optional || true
 
   if [[ "$CONFIGURED_RUNTIME" == "claude" ]] && ! have claude; then
     echo
@@ -169,6 +170,11 @@ doctor() {
   if [[ "$CONFIGURED_RUNTIME" == "codex" || "$CONFIGURED_RUNTIME" == "codex_tui" ]] && ! have codex; then
     echo
     echo "Configured runtime requires Codex, but 'codex' is not on PATH."
+    failures=1
+  fi
+  if [[ "$CONFIGURED_RUNTIME" == "pi" ]] && ! have pi; then
+    echo
+    echo "Configured runtime requires Pi, but 'pi' is not on PATH."
     failures=1
   fi
 
@@ -193,6 +199,9 @@ doctor() {
   fi
   if ! have codex; then
     echo "- Install and authenticate Codex if you want GOAT_AGENT_RUNTIME=codex or codex_tui"
+  fi
+  if ! have pi; then
+    echo "- Install and authenticate Pi if you want GOAT_AGENT_RUNTIME=pi"
   fi
 
   if [[ "$failures" -ne 0 ]]; then

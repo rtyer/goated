@@ -9,6 +9,7 @@ import (
 	"goated/internal/claudetui"
 	"goated/internal/codex"
 	"goated/internal/codextui"
+	"goated/internal/pi"
 )
 
 type runtimeImpl struct {
@@ -63,7 +64,15 @@ func New(cfg app.Config) (agent.Runtime, error) {
 			headless:   headless,
 			descriptor: session.Descriptor(),
 		}, nil
+	case agent.RuntimePi:
+		session := pi.NewSessionRuntime(cfg.WorkspaceDir, cfg.LogDir)
+		headless := pi.NewHeadlessRuntime(cfg.WorkspaceDir)
+		return &runtimeImpl{
+			session:    session,
+			headless:   headless,
+			descriptor: session.Descriptor(),
+		}, nil
 	default:
-		return nil, fmt.Errorf("unsupported GOAT_AGENT_RUNTIME %q (use claude, codex, claude_tui, or codex_tui)", cfg.AgentRuntime)
+		return nil, fmt.Errorf("unsupported GOAT_AGENT_RUNTIME %q (use claude, codex, pi, claude_tui, or codex_tui)", cfg.AgentRuntime)
 	}
 }
