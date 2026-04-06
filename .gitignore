@@ -31,6 +31,7 @@ workspace/logs/
 
 # Claude Code local settings
 workspace/.claude
+workspace/.mcp.json
 
 # Claude Code
 .claude/
