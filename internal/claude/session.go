@@ -193,8 +193,8 @@ func (r *SessionRuntime) warmUpSession(ctx context.Context) error {
 	return nil
 }
 
-func (r *SessionRuntime) SendUserPrompt(ctx context.Context, channel, chatID, userPrompt string, attachments *agent.MessageAttachments, messageID, threadID string) error {
-	envelope := agent.BuildPromptEnvelope(channel, chatID, userPrompt, attachments, messageID, threadID)
+func (r *SessionRuntime) SendUserPrompt(ctx context.Context, channel, chatID, userPrompt string, attachments *agent.MessageAttachments, messageID, threadID string, msgCtx *agent.MessageContext) error {
+	envelope := agent.BuildPromptEnvelope(channel, chatID, userPrompt, attachments, messageID, threadID, msgCtx)
 	return r.sendEnvelope(ctx, envelope)
 }
 

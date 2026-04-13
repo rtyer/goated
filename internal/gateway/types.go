@@ -18,6 +18,9 @@ type IncomingMessage struct {
 	Channel              string
 	ChatID               string
 	UserID               string
+	UserName             string // display name of the sender (first + last)
+	UserUsername         string // @handle of the sender (no @), may be empty
+	ChatType             string // "private", "group", "supergroup", "channel"
 	Text                 string
 	MessageID            string // platform message ID (e.g. Slack ts)
 	ThreadID             string // platform thread ID (e.g. Slack thread_ts)

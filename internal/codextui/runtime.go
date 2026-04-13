@@ -106,12 +106,12 @@ func (s *SessionRuntime) ResetConversation(ctx context.Context, _ string) (agent
 	}, nil
 }
 
-func (s *SessionRuntime) SendUserPrompt(ctx context.Context, channel, chatID, userPrompt string, _ *agent.MessageAttachments, messageID, threadID string) error {
+func (s *SessionRuntime) SendUserPrompt(ctx context.Context, channel, chatID, userPrompt string, _ *agent.MessageAttachments, messageID, threadID string, msgCtx *agent.MessageContext) error {
 	if err := s.EnsureSession(ctx); err != nil {
 		return err
 	}
 	s.markSend()
-	return tmux.PasteAndEnterFor(ctx, s.sessionName(), agent.BuildPromptEnvelope(channel, chatID, userPrompt, nil, messageID, threadID))
+	return tmux.PasteAndEnterFor(ctx, s.sessionName(), agent.BuildPromptEnvelope(channel, chatID, userPrompt, nil, messageID, threadID, msgCtx))
 }
 
 func (s *SessionRuntime) SendBatchPrompt(ctx context.Context, channel, chatID string, messages []agent.PromptMessage) error {

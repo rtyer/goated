@@ -32,6 +32,13 @@ var gatewayTelegramCmd = &cobra.Command{
 		if cfg.TelegramBotToken == "" {
 			return fmt.Errorf("GOAT_TELEGRAM_BOT_TOKEN is required")
 		}
+		if len(cfg.TelegramAllowedChatIDs) == 0 {
+			return fmt.Errorf("telegram.allowed_chat_ids is required (configure via `goated channel allow <channel> <chat-id>`)")
+		}
+		allowedIDs, err := cfg.ParsedTelegramAllowedChatIDs()
+		if err != nil {
+			return err
+		}
 
 		database, err := db.Open(cfg.DBPath)
 		if err != nil {
@@ -56,7 +63,7 @@ var gatewayTelegramCmd = &cobra.Command{
 			AdminChatID:     cfg.AdminChatID,
 		}
 
-		conn, err := telegram.NewConnector(cfg.TelegramBotToken, database, telegram.AttachmentConfig{
+		conn, err := telegram.NewConnector(cfg.TelegramBotToken, allowedIDs, database, telegram.AttachmentConfig{
 			RootPath:      cfg.TelegramAttachmentsRoot,
 			MaxBytes:      cfg.TelegramAttachmentMaxBytes,
 			MaxTotalBytes: cfg.TelegramAttachmentMaxTotalBytes,

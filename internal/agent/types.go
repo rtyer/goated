@@ -109,13 +109,24 @@ type MessageAttachments struct {
 	Succeeded []AttachmentInfo // attachments that were successfully saved
 }
 
+// MessageContext carries per-message sender and chat-type metadata. Nil is
+// safe for callers that don't have sender info (e.g. legacy replay paths).
+// UserID/UserName/UserUsername describe who sent the message; ChatType
+// describes whether the conversation is a DM or a group.
+type MessageContext struct {
+	UserID       string // platform user ID (Telegram user ID, Slack user ID)
+	UserName     string // display name (e.g. "Alice Smith")
+	UserUsername string // @handle without the @ (may be empty)
+	ChatType     string // "private", "group", "supergroup", "channel", or ""
+}
+
 type SessionRuntime interface {
 	Descriptor() RuntimeDescriptor
 	EnsureSession(ctx context.Context) error
 	StopSession(ctx context.Context) error
 	RestartSession(ctx context.Context) error
 	ResetConversation(ctx context.Context, chatID string) (ResetResult, error)
-	SendUserPrompt(ctx context.Context, channel, chatID, userPrompt string, attachments *MessageAttachments, messageID, threadID string) error
+	SendUserPrompt(ctx context.Context, channel, chatID, userPrompt string, attachments *MessageAttachments, messageID, threadID string, msgCtx *MessageContext) error
 	SendBatchPrompt(ctx context.Context, channel, chatID string, messages []PromptMessage) error
 	SendControlCommand(ctx context.Context, text string) error
 	GetContextEstimate(ctx context.Context, chatID string) (ContextEstimate, error)

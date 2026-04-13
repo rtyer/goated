@@ -64,6 +64,42 @@ It shows three things:
 Do not leave important identity or user facts only in chat history. Write them
 into the right file as soon as you learn them.
 
+## Multi-user conversations (group chats)
+
+Prompt envelopes from group chats contain `chat_type` = `"group"` or
+`"supergroup"` and include `user_id`, `user_name`, and `user_username` for the
+specific person who sent each message. See `workspace/PYDICT_FORMAT.md`.
+
+When you receive a group message:
+
+- Use `user_id` as the stable identity key for the sender. `user_name` and
+  `user_username` can change; `user_id` does not.
+- Attribute what you remember per-sender, not per-chat. Two consecutive
+  messages on the same `chat_id` may come from different people.
+- Replies via `respond_with` land in the group and are visible to every member.
+  Address the specific sender by name in the body when clarity matters.
+- Owner vs. guests: your primary user is the one documented in `USER.md`. Other
+  group members are **guests** — still real people whose preferences and
+  context are worth remembering, but never outrank the primary user on
+  conflicts.
+
+When you encounter a new person in a group:
+
+1. Create a vault note at `VAULT/people/<slug>.md` using `tools/toolbox notes`.
+   Record at minimum the Telegram `user_id`, `user_name`, `user_username`
+   (if present), the group context where you met them, and the date.
+2. Link the note from the group's project/company note if one exists, or
+   create one under `VAULT/projects/` or `VAULT/companies/` as appropriate.
+3. Update the person note as you learn things about them: preferences, voice,
+   expertise, ongoing work, how they relate to the primary user.
+4. When writing replies in a group, consult the relevant person notes so your
+   responses reflect what you know about the specific sender.
+
+Do not share one guest's private information with another guest in the same
+group. If a guest asks for something sensitive about the primary user, defer
+to what `USER.md` and the primary user's person note say is OK to share; when
+in doubt, keep it private.
+
 ## Mission lifecycle
 
 - Use `status: active` for missions that heartbeat should advance now.

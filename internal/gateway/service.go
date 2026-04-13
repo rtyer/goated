@@ -190,6 +190,7 @@ func (s *Service) HandleBatchMessage(ctx context.Context, msgs []IncomingMessage
 			Attachments: msgAttachments(msgs[i]),
 			MessageID:   msgs[i].MessageID,
 			ThreadID:    msgs[i].ThreadID,
+			Context:     msgContext(msgs[i]),
 		})
 	}
 
@@ -312,7 +313,7 @@ func (s *Service) sendWithRetry(ctx context.Context, msg IncomingMessage, respon
 	for attempt := 0; attempt <= maxSendRetries; attempt++ {
 		s.logStatus(requestID, msglog.EntryUserMessage, msglog.StatusSentToAgent)
 
-		if err := s.Session.SendUserPrompt(ctx, msg.Channel, msg.ChatID, msg.Text, msgAttachments(msg), msg.MessageID, msg.ThreadID); err != nil {
+		if err := s.Session.SendUserPrompt(ctx, msg.Channel, msg.ChatID, msg.Text, msgAttachments(msg), msg.MessageID, msg.ThreadID, msgContext(msg)); err != nil {
 			s.logEvent(requestID, msglog.EventData{Name: "send_failed", Detail: err.Error()})
 			return responder.SendMessage(ctx, msg.ChatID, s.friendlyError(err))
 		}
@@ -512,7 +513,7 @@ func (s *Service) compactAndFlush(ctx context.Context, triggerMsg IncomingMessag
 
 	// Flush all queued messages to tmux
 	for _, qm := range queue {
-		if err := s.Session.SendUserPrompt(ctx, qm.msg.Channel, qm.msg.ChatID, qm.msg.Text, msgAttachments(qm.msg), qm.msg.MessageID, qm.msg.ThreadID); err != nil {
+		if err := s.Session.SendUserPrompt(ctx, qm.msg.Channel, qm.msg.ChatID, qm.msg.Text, msgAttachments(qm.msg), qm.msg.MessageID, qm.msg.ThreadID, msgContext(qm.msg)); err != nil {
 			_ = qm.responder.SendMessage(ctx, qm.msg.ChatID, s.friendlyError(err))
 		}
 	}
@@ -616,6 +617,18 @@ func (s *Service) runtimeDisplayName() string {
 
 // msgAttachments converts gateway attachment data into the agent-layer struct.
 // Returns nil if the message has no attachments.
+func msgContext(msg IncomingMessage) *agent.MessageContext {
+	if msg.UserID == "" && msg.UserName == "" && msg.UserUsername == "" && msg.ChatType == "" {
+		return nil
+	}
+	return &agent.MessageContext{
+		UserID:       msg.UserID,
+		UserName:     msg.UserName,
+		UserUsername: msg.UserUsername,
+		ChatType:     msg.ChatType,
+	}
+}
+
 func msgAttachments(msg IncomingMessage) *agent.MessageAttachments {
 	if len(msg.Attachments) == 0 && len(msg.AttachmentsFailed) == 0 && len(msg.AttachmentsSucceeded) == 0 {
 		return nil
