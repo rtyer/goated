@@ -689,6 +689,27 @@ func (s *Store) AllChannels() ([]Channel, error) {
 	return channels, err
 }
 
+func (s *Store) UpdateChannel(ch Channel) error {
+	return s.update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(channelsBucket)
+		existing := b.Get([]byte(ch.Name))
+		if existing == nil {
+			return fmt.Errorf("channel %q not found", ch.Name)
+		}
+		if ch.CreatedAt == "" {
+			var prev Channel
+			if err := json.Unmarshal(existing, &prev); err == nil {
+				ch.CreatedAt = prev.CreatedAt
+			}
+		}
+		data, err := json.Marshal(ch)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(ch.Name), data)
+	})
+}
+
 func (s *Store) DeleteChannel(name string) error {
 	return s.update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(channelsBucket)

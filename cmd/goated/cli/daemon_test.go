@@ -24,7 +24,7 @@ func (s *noticeSpySession) RestartSession(context.Context) error { return nil }
 func (s *noticeSpySession) ResetConversation(context.Context, string) (agent.ResetResult, error) {
 	return agent.ResetResult{}, nil
 }
-func (s *noticeSpySession) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string) error {
+func (s *noticeSpySession) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string, *agent.MessageContext) error {
 	return nil
 }
 func (s *noticeSpySession) SendBatchPrompt(context.Context, string, string, []agent.PromptMessage) error {

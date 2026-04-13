@@ -15,16 +15,20 @@ When the gateway delivers a user message, it arrives as a pydict:
 
 ```python
 {
-  "chat_id": "D0ACHSF1THP",
-  "formatting": "SLACK_MESSAGE_FORMATTING.md",
+  "chat_id": "-5148442475",
+  "chat_type": "supergroup",
+  "user_id": "8160342309",
+  "user_name": "Alan Botts",
+  "user_username": "alanbotts",
+  "formatting": "TELEGRAM_MESSAGE_FORMATTING.md",
   "message": """Hey, what's the weather?
 
 Also check this:
 \```python
 print('hello')
 \```""",
-  "respond_with": "./goat send_user_message --chat D0ACHSF1THP",
-  "source": "slack",
+  "respond_with": "./goat send_user_message --chat -5148442475",
+  "source": "telegram",
 }
 ```
 
@@ -33,10 +37,18 @@ print('hello')
 | Key | Description |
 |-----|-------------|
 | `source` | Channel: `"slack"` or `"telegram"` |
-| `chat_id` | Chat/channel ID for responses |
-| `message` | The user's message text |
-| `respond_with` | Command to pipe your response into |
+| `chat_id` | Chat/channel ID for responses (negative on Telegram = group chat) |
+| `chat_type` | `"private"` (DM), `"group"`, `"supergroup"`, or `"channel"`. Optional; absent for legacy sources |
+| `user_id` | Platform ID of the user who sent this message. Critical in groups where `chat_id` doesn't identify the speaker |
+| `user_name` | Human display name of the sender, e.g. `"Alan Botts"` |
+| `user_username` | Handle of the sender without `@` (may be absent) |
+| `message` | The user's message text (with `@yourbotname` stripped in groups) |
+| `respond_with` | Command to pipe your response into. Replies to `chat_id`, so group prompts get group replies automatically |
 | `formatting` | Channel-specific formatting doc to follow |
+
+### Group-chat semantics
+
+When `chat_type` is `"group"` or `"supergroup"`, multiple humans share the same `chat_id`. Always use `user_id` / `user_name` to attribute what you're reading — two consecutive messages on the same `chat_id` may be from different people. Responses sent via `respond_with` land in the group, visible to everyone. If you need to acknowledge a specific sender, address them by name in the reply body.
 
 ## Syntax reference
 

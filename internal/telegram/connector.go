@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
@@ -37,6 +38,10 @@ type Connector struct {
 	attachmentTotalMax  int64
 	attachmentRetention time.Duration
 	sweepEvery          time.Duration
+
+	allowedChatIDs map[int64]struct{}
+	botUsername    string
+	botUserID      int64
 }
 
 type RunMode string
@@ -52,7 +57,7 @@ type WebhookOptions struct {
 	Path       string
 }
 
-func NewConnector(token string, store OffsetStore, attachmentCfg AttachmentConfig) (*Connector, error) {
+func NewConnector(token string, allowedChatIDs []int64, store OffsetStore, attachmentCfg AttachmentConfig) (*Connector, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("init telegram bot: %w", err)
@@ -86,6 +91,11 @@ func NewConnector(token string, store OffsetStore, attachmentCfg AttachmentConfi
 		maxTotalBytes = defaultAttachmentTotalMax
 	}
 
+	allowed := make(map[int64]struct{}, len(allowedChatIDs))
+	for _, id := range allowedChatIDs {
+		allowed[id] = struct{}{}
+	}
+
 	return &Connector{
 		bot:                 bot,
 		store:               store,
@@ -96,6 +106,9 @@ func NewConnector(token string, store OffsetStore, attachmentCfg AttachmentConfi
 		attachmentTotalMax:  maxTotalBytes,
 		attachmentRetention: defaultAttachmentRetention,
 		sweepEvery:          defaultAttachmentSweepEvery,
+		allowedChatIDs:      allowed,
+		botUsername:         bot.Self.UserName,
+		botUserID:           bot.Self.ID,
 	}, nil
 }
 
@@ -234,7 +247,33 @@ func (c *Connector) processUpdate(ctx context.Context, handler gateway.Handler, 
 		return nil
 	}
 
+	chatID := update.Message.Chat.ID
+	if len(c.allowedChatIDs) > 0 {
+		if _, ok := c.allowedChatIDs[chatID]; !ok {
+			userID := int64(0)
+			if update.Message.From != nil {
+				userID = int64(update.Message.From.ID)
+			}
+			fmt.Fprintf(os.Stderr,
+				"telegram: rejected message from unauthorized chat_id=%d user_id=%d\n",
+				chatID, userID,
+			)
+			_ = c.SendMessage(ctx, strconv.FormatInt(chatID, 10),
+				"Sorry, you're not authorized to use this bot.")
+			return nil
+		}
+	}
+
+	isGroup := update.Message.Chat.IsGroup() || update.Message.Chat.IsSuperGroup()
+	if isGroup && !c.messageAddressesBot(update.Message) {
+		return nil
+	}
+
 	text := strings.TrimSpace(update.Message.Text)
+	if isGroup {
+		text = c.stripBotMention(text)
+		text = strings.TrimSpace(text)
+	}
 	if text == "" {
 		text = strings.TrimSpace(update.Message.Caption)
 	}
@@ -250,10 +289,18 @@ func (c *Connector) processUpdate(ctx context.Context, handler gateway.Handler, 
 			len(attachmentResults), len(succeeded), len(failed), sumAttachmentBytes(succeeded),
 		)
 	}
+	var userName, userUsername string
+	if update.Message.From != nil {
+		userName = strings.TrimSpace(update.Message.From.FirstName + " " + update.Message.From.LastName)
+		userUsername = update.Message.From.UserName
+	}
 	msg := gateway.IncomingMessage{
 		Channel:              "telegram",
 		ChatID:               strconv.FormatInt(update.Message.Chat.ID, 10),
 		UserID:               strconv.FormatInt(int64(update.Message.From.ID), 10),
+		UserName:             userName,
+		UserUsername:         userUsername,
+		ChatType:             update.Message.Chat.Type,
 		Text:                 text,
 		MessageID:            strconv.Itoa(update.Message.MessageID),
 		Attachments:          attachments,
@@ -387,4 +434,92 @@ func (c *Connector) startTypingLoop(ctx context.Context, chatID int64) func() {
 	return func() {
 		close(done)
 	}
+}
+
+// messageAddressesBot reports whether a group/supergroup message is directed
+// at this bot. True if any of: (a) the message @-mentions the bot's username,
+// (b) the message is a reply to one of the bot's messages, (c) the message is
+// a bot_command targeting this bot (`/x` or `/x@botusername`).
+func (c *Connector) messageAddressesBot(msg *tgbotapi.Message) bool {
+	if msg == nil {
+		return false
+	}
+	if msg.ReplyToMessage != nil && msg.ReplyToMessage.From != nil {
+		if msg.ReplyToMessage.From.ID == c.botUserID {
+			return true
+		}
+	}
+	if c.botUsername == "" {
+		return false
+	}
+	mention := "@" + strings.ToLower(c.botUsername)
+	for _, ent := range entitiesFromMessage(msg) {
+		switch {
+		case ent.IsMention():
+			if strings.EqualFold(entityText(msg, ent), mention) {
+				return true
+			}
+		case ent.IsCommand():
+			cmd := entityText(msg, ent)
+			// `/foo` or `/foo@botname` — Telegram delivers @-suffixed commands
+			// only to the targeted bot, so trust those. `/foo` with no suffix
+			// gets delivered to all bots in privacy-off groups; accept it if
+			// the bot is a member.
+			if at := strings.Index(cmd, "@"); at >= 0 {
+				if strings.EqualFold(cmd[at:], mention) {
+					return true
+				}
+			} else {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// stripBotMention removes any `@botusername` substrings from text
+// (case-insensitive) and collapses extra whitespace.
+func (c *Connector) stripBotMention(text string) string {
+	if c.botUsername == "" || text == "" {
+		return text
+	}
+	target := "@" + strings.ToLower(c.botUsername)
+	lower := strings.ToLower(text)
+	var b strings.Builder
+	i := 0
+	for i < len(text) {
+		idx := strings.Index(lower[i:], target)
+		if idx < 0 {
+			b.WriteString(text[i:])
+			break
+		}
+		b.WriteString(text[i : i+idx])
+		i += idx + len(target)
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+func entitiesFromMessage(msg *tgbotapi.Message) []tgbotapi.MessageEntity {
+	if len(msg.Entities) > 0 {
+		return msg.Entities
+	}
+	return msg.CaptionEntities
+}
+
+// entityText extracts the substring covered by a MessageEntity. Telegram
+// entity offsets are UTF-16 code units; we convert via the UTF-16 view of the
+// source text (Message.Text or Caption).
+func entityText(msg *tgbotapi.Message, ent tgbotapi.MessageEntity) string {
+	src := msg.Text
+	if src == "" {
+		src = msg.Caption
+	}
+	if src == "" {
+		return ""
+	}
+	u16 := utf16.Encode([]rune(src))
+	if ent.Offset < 0 || ent.Offset+ent.Length > len(u16) {
+		return ""
+	}
+	return string(utf16.Decode(u16[ent.Offset : ent.Offset+ent.Length]))
 }

@@ -35,3 +35,12 @@ All text outside code blocks is HTML-escaped automatically. You don't need to wo
 ## Message size limit
 
 Telegram caps messages at **4,096 characters**. Unlike Slack, the current implementation does NOT auto-split. Keep responses concise for Telegram.
+
+## Group chats
+
+When the envelope's `chat_type` is `"group"` or `"supergroup"`, the conversation has multiple humans on the same `chat_id`. Key things to remember:
+
+- `user_id`, `user_name`, and `user_username` identify *who sent this specific message*. Attribute per-sender, not per-chat — two consecutive messages may be from different people.
+- `respond_with` sends replies into the group, visible to every member. If you need to acknowledge a specific sender, address them by name (or `@username`) in the body.
+- Your primary user is the human documented in `self/USER.md`. Other group members are guests — still worth remembering (see `self/AGENTS.md` for the vault discipline), but never outrank the primary user when preferences conflict.
+- Do not share one guest's private info with another guest. When in doubt about what to share about the primary user, default to private.

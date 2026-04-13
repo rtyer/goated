@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -54,6 +56,12 @@ var channelListCmd = &cobra.Command{
 					mode = "polling"
 				}
 				fmt.Printf("  %-20s  mode=%s\n", "", mode)
+				allowed := parseAllowedChatIDs(ch.Config["allowed_chat_ids"])
+				if len(allowed) == 0 {
+					fmt.Printf("  %-20s  allowed_chat_ids=(none — bot will refuse to start)\n", "")
+				} else {
+					fmt.Printf("  %-20s  allowed_chat_ids=%s\n", "", strings.Join(allowed, ","))
+				}
 			case "slack":
 				chID := ch.Config["channel_id"]
 				if chID != "" {
@@ -182,6 +190,27 @@ func promptChannel(reader *bufio.Reader) (*db.Channel, error) {
 
 		config["bot_token"] = promptSecretRequired(reader, "Telegram bot token")
 
+		fmt.Println()
+		fmt.Println("  Allowed chat IDs restrict who can message the bot. The daemon will")
+		fmt.Println("  refuse to start until at least one chat ID is allowed.")
+		fmt.Println()
+		fmt.Println("  How to get your personal chat ID:")
+		fmt.Println("    DM @userinfobot on Telegram; it replies with your numeric ID.")
+		fmt.Println()
+		fmt.Println("  How to get a group chat ID (optional, for group-chat support):")
+		fmt.Println("    Add the bot to the group, send `/start@<yourbotname>`, then check")
+		fmt.Println("    logs/goated_daemon.log for a `rejected ... chat_id=<negative-id>` line.")
+		fmt.Println("    You can add group IDs now (comma-separated) or later via")
+		fmt.Println("    `goated channel allow -- <name> <chat-id>` (the `--` is required")
+		fmt.Println("    because group IDs start with `-`).")
+		fmt.Println()
+		allowed := prompt(reader, "Allowed chat IDs (comma-separated)", "")
+		if parsed, err := normalizeAllowedChatIDs(allowed); err != nil {
+			return nil, err
+		} else {
+			config["allowed_chat_ids"] = parsed
+		}
+
 		mode := prompt(reader, "Mode (polling/webhook)", "polling")
 		config["mode"] = mode
 
@@ -255,6 +284,12 @@ func writeChannelConfig(ch *db.Channel) error {
 				telegram["webhook_path"] = v
 			}
 		}
+		allowed := parseAllowedChatIDs(ch.Config["allowed_chat_ids"])
+		ids := make([]any, 0, len(allowed))
+		for _, id := range allowed {
+			ids = append(ids, id)
+		}
+		telegram["allowed_chat_ids"] = ids
 		existing["telegram"] = telegram
 
 	case "slack":
@@ -350,10 +385,170 @@ func slackAppManifest(displayName string) string {
 	return "  " + string(data)
 }
 
+var channelAllowCmd = &cobra.Command{
+	Use:   "allow <channel> <chat-id>",
+	Short: "Add a Telegram chat ID to the allowlist for a channel",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return mutateAllowedChatIDs(args[0], args[1], true)
+	},
+}
+
+var channelUnallowCmd = &cobra.Command{
+	Use:   "unallow <channel> <chat-id>",
+	Short: "Remove a Telegram chat ID from the allowlist for a channel",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return mutateAllowedChatIDs(args[0], args[1], false)
+	},
+}
+
+var channelAllowListCmd = &cobra.Command{
+	Use:   "allow-list <channel>",
+	Short: "Show the Telegram chat ID allowlist for a channel",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := app.LoadConfig()
+		store, err := db.Open(cfg.DBPath)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+
+		ch, err := store.GetChannel(args[0])
+		if err != nil {
+			return err
+		}
+		if ch.Type != "telegram" {
+			return fmt.Errorf("channel %q is type %q; allow-list only applies to telegram channels", ch.Name, ch.Type)
+		}
+		ids := parseAllowedChatIDs(ch.Config["allowed_chat_ids"])
+		if len(ids) == 0 {
+			fmt.Println("(empty — bot will refuse to start)")
+			return nil
+		}
+		for _, id := range ids {
+			fmt.Println(id)
+		}
+		return nil
+	},
+}
+
+func mutateAllowedChatIDs(channelName, chatIDArg string, add bool) error {
+	chatID, err := strconv.ParseInt(strings.TrimSpace(chatIDArg), 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid chat id %q: %w", chatIDArg, err)
+	}
+
+	cfg := app.LoadConfig()
+	store, err := db.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	ch, err := store.GetChannel(channelName)
+	if err != nil {
+		return err
+	}
+	if ch.Type != "telegram" {
+		return fmt.Errorf("channel %q is type %q; allowlist only applies to telegram channels", ch.Name, ch.Type)
+	}
+
+	existing := parseAllowedChatIDs(ch.Config["allowed_chat_ids"])
+	idStr := strconv.FormatInt(chatID, 10)
+	updated := make([]string, 0, len(existing)+1)
+	found := false
+	for _, id := range existing {
+		if id == idStr {
+			found = true
+			if add {
+				updated = append(updated, id)
+			}
+			continue
+		}
+		updated = append(updated, id)
+	}
+	if add {
+		if found {
+			fmt.Printf("Chat ID %s already allowed on channel %q.\n", idStr, ch.Name)
+			return nil
+		}
+		updated = append(updated, idStr)
+	} else if !found {
+		return fmt.Errorf("chat id %s not in allowlist for channel %q", idStr, ch.Name)
+	}
+
+	if ch.Config == nil {
+		ch.Config = make(map[string]string)
+	}
+	ch.Config["allowed_chat_ids"] = strings.Join(updated, ",")
+
+	if err := store.UpdateChannel(*ch); err != nil {
+		return err
+	}
+
+	active := store.GetMeta("active_channel")
+	if active == ch.Name {
+		if err := writeChannelConfig(ch); err != nil {
+			return err
+		}
+		fmt.Println("Updated active channel; restart the daemon for changes to take effect.")
+	}
+
+	if add {
+		fmt.Printf("Added chat ID %s to channel %q. Allowlist now: %s\n", idStr, ch.Name, strings.Join(updated, ","))
+	} else {
+		if len(updated) == 0 {
+			fmt.Printf("Removed chat ID %s from channel %q. Allowlist now empty.\n", idStr, ch.Name)
+		} else {
+			fmt.Printf("Removed chat ID %s from channel %q. Allowlist now: %s\n", idStr, ch.Name, strings.Join(updated, ","))
+		}
+	}
+	return nil
+}
+
+// parseAllowedChatIDs splits a stored comma-separated allowlist into a slice of
+// trimmed non-empty ID strings. Deduplicates while preserving order.
+func parseAllowedChatIDs(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// normalizeAllowedChatIDs validates that each comma-separated entry parses as an
+// int64 and returns a canonical comma-separated string.
+func normalizeAllowedChatIDs(raw string) (string, error) {
+	ids := parseAllowedChatIDs(raw)
+	for _, id := range ids {
+		if _, err := strconv.ParseInt(id, 10, 64); err != nil {
+			return "", fmt.Errorf("invalid chat id %q: %w", id, err)
+		}
+	}
+	return strings.Join(ids, ","), nil
+}
+
 func init() {
 	channelCmd.AddCommand(channelListCmd)
 	channelCmd.AddCommand(channelAddCmd)
 	channelCmd.AddCommand(channelSwitchCmd)
 	channelCmd.AddCommand(channelDeleteCmd)
+	channelCmd.AddCommand(channelAllowCmd)
+	channelCmd.AddCommand(channelUnallowCmd)
+	channelCmd.AddCommand(channelAllowListCmd)
 	rootCmd.AddCommand(channelCmd)
 }

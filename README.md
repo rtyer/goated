@@ -305,6 +305,7 @@ Settings (`goated.json`):
 | `telegram.mode`                  | `polling`             | `polling` or `webhook`                            |
 | `telegram.webhook_addr`          | `:8080`               | Listen address for webhook mode                   |
 | `telegram.webhook_path`          | `/telegram/webhook`   | Webhook endpoint path                             |
+| `telegram.allowed_chat_ids`      | `[]`                  | Required. List of chat IDs allowed to DM the bot (negative IDs for group chats) |
 | `slack.channel_id`               | `""`                  | Monitored Slack DM/channel ID                     |
 
 Secrets (`workspace/creds/*.txt`, env vars override):
@@ -315,6 +316,62 @@ Secrets (`workspace/creds/*.txt`, env vars override):
 | `GOAT_ADMIN_CHAT_ID`            | Chat ID for admin alerts when auto-recovery fails |
 | `GOAT_SLACK_BOT_TOKEN`          | Bot User OAuth Token (xoxb-...)                   |
 | `GOAT_SLACK_APP_TOKEN`          | App-Level Token (xapp-...) for Socket Mode        |
+
+### Telegram chat allowlist
+
+Goated refuses to start with `gateway=telegram` until at least one chat ID is on the allowlist. This protects the bot from strangers who discover its handle. Bootstrap prompts for allowed IDs; you can also manage them later:
+
+```sh
+./goated channel allow    <channel> <chat-id>    # add an ID
+./goated channel unallow  <channel> <chat-id>    # remove an ID
+./goated channel allow-list <channel>            # show current allowlist
+```
+
+**Negative IDs (groups)** must be passed after `--` so the shell doesn't parse them as flags:
+
+```sh
+./goated channel allow -- telegram -1001234567890
+```
+
+To discover your personal chat ID, DM [@userinfobot](https://t.me/userinfobot) — it replies with your numeric ID. To discover a group's chat ID, temporarily add the bot to the group, send any command (for example `/start@YourBot`), and check the daemon log for the rejection line containing the negative `chat_id`.
+
+### Telegram group chats
+
+Goated supports group chats. The bot only *responds* to group messages that address it:
+
+1. The message @-mentions the bot (`@YourBot what's up?`), OR
+2. The message is a **reply** to one of the bot's own messages, OR
+3. The message is a slash-command targeting the bot (`/ask@YourBot ...`, or `/ask` if privacy mode is off).
+
+Everything else in a group is silently ignored — no "not authorized" reply — so the bot doesn't spam the group.
+
+> **⚠️ Trust model.** Allowlisting a group chat ID grants **every current and future member** of that group the ability to prompt the bot. Only allowlist groups whose members you trust as if they were you. The envelope does include `user_id` and `user_name` so the agent knows *who* is speaking (see [PYDICT_FORMAT.md](workspace/PYDICT_FORMAT.md)), but the bot will still honor any request the message makes. Remove the group from the allowlist the moment an untrusted person joins.
+
+#### Setup
+
+1. **Enable groups** in [@BotFather](https://t.me/BotFather) → `/mybots` → pick your bot → **Bot Settings** → **Allow Groups?** → **Turn on**.
+2. **(Strongly recommended) Disable group privacy** so the bot reliably receives @-mentions:
+   - BotFather → same path → **Group Privacy** → **Turn off**.
+   - Telegram caches privacy mode per-membership, so you **must remove and re-add the bot to the group** after toggling it, or the bot will keep missing @-mentions. With privacy off, the bot sees every group message — Goated still filters to only respond to ones that address it, so the trust model doesn't change.
+3. **Add the bot to the group:** group header → Add Member → search for `@YourBot`.
+4. **Discover the group's chat ID:** in the group, send `/start@YourBot` (slash-commands always reach the target bot, even with privacy on). The daemon log will print a rejection line:
+   ```
+   telegram: rejected message from unauthorized chat_id=-5148442475 user_id=...
+   ```
+   Copy the **negative** `chat_id`.
+5. **Allowlist the group.** Because the ID starts with `-`, use `--` to stop shell flag parsing:
+   ```sh
+   ./goated channel allow -- telegram -5148442475
+   ```
+6. **Restart the daemon.** `@YourBot` mentions and replies-to-bot in that group now reach the agent.
+
+#### Day-to-day usage
+
+- **@-mention to start a new thread:** `@YourBot can you summarize the PR?`. You must pick `YourBot` from Telegram's autocomplete dropdown — typing the name as plain text does **not** create a mention entity and the bot will not see it.
+- **Reply to continue a thread:** tap-and-hold the bot's message → Reply. No @-mention needed on follow-ups because Telegram delivers replies-to-bot even under privacy mode.
+- **Bot commands:** anything like `/help@YourBot` or `/schedule@YourBot ...` also works.
+
+The prompt envelope delivered to the agent carries the group's `chat_id`, the sender's `user_id` / `user_name` / `user_username`, and `chat_type`. `respond_with` sends replies back into the same group automatically. The `@YourBot` mention is stripped from the message text before handing it to the agent.
 
 ### Start
 

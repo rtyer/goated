@@ -11,7 +11,7 @@ import (
 // BuildPromptEnvelope constructs the pydict-encoded prompt envelope that gets
 // pasted into a tmux agent session. This is runtime-agnostic — both Claude and
 // Codex sessions receive the same envelope format.
-func BuildPromptEnvelope(channel, chatID, userPrompt string, attachments *MessageAttachments, messageID, threadID string) string {
+func BuildPromptEnvelope(channel, chatID, userPrompt string, attachments *MessageAttachments, messageID, threadID string, msgCtx *MessageContext) string {
 	var formattingDoc string
 	switch channel {
 	case "slack":
@@ -24,6 +24,21 @@ func BuildPromptEnvelope(channel, chatID, userPrompt string, attachments *Messag
 		{Key: "message", Value: strings.TrimSpace(userPrompt)},
 		{Key: "source", Value: channel},
 		{Key: "chat_id", Value: chatID},
+	}
+
+	if msgCtx != nil {
+		if msgCtx.ChatType != "" {
+			kvs = append(kvs, pydict.KV{Key: "chat_type", Value: msgCtx.ChatType})
+		}
+		if msgCtx.UserID != "" {
+			kvs = append(kvs, pydict.KV{Key: "user_id", Value: msgCtx.UserID})
+		}
+		if msgCtx.UserName != "" {
+			kvs = append(kvs, pydict.KV{Key: "user_name", Value: msgCtx.UserName})
+		}
+		if msgCtx.UserUsername != "" {
+			kvs = append(kvs, pydict.KV{Key: "user_username", Value: msgCtx.UserUsername})
+		}
 	}
 
 	if messageID != "" {
@@ -58,6 +73,7 @@ type PromptMessage struct {
 	Attachments *MessageAttachments
 	MessageID   string
 	ThreadID    string
+	Context     *MessageContext
 }
 
 // BuildBatchEnvelope constructs a pydict-encoded prompt envelope containing
@@ -83,6 +99,20 @@ func BuildBatchEnvelope(channel, chatID string, messages []PromptMessage) string
 		}
 		if m.ThreadID != "" {
 			item["thread_id"] = m.ThreadID
+		}
+		if m.Context != nil {
+			if m.Context.ChatType != "" {
+				item["chat_type"] = m.Context.ChatType
+			}
+			if m.Context.UserID != "" {
+				item["user_id"] = m.Context.UserID
+			}
+			if m.Context.UserName != "" {
+				item["user_name"] = m.Context.UserName
+			}
+			if m.Context.UserUsername != "" {
+				item["user_username"] = m.Context.UserUsername
+			}
 		}
 		if m.Attachments != nil {
 			paths := make([]any, 0, len(m.Attachments.Paths))

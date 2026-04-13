@@ -15,13 +15,13 @@ type stubRuntime struct{}
 func (s stubRuntime) Descriptor() agent.RuntimeDescriptor {
 	return agent.RuntimeDescriptor{DisplayName: "Claude Code TUI"}
 }
-func (s stubRuntime) EnsureSession(context.Context) error                { return nil }
-func (s stubRuntime) StopSession(context.Context) error                  { return nil }
-func (s stubRuntime) RestartSession(context.Context) error               { return nil }
+func (s stubRuntime) EnsureSession(context.Context) error  { return nil }
+func (s stubRuntime) StopSession(context.Context) error    { return nil }
+func (s stubRuntime) RestartSession(context.Context) error { return nil }
 func (s stubRuntime) ResetConversation(context.Context, string) (agent.ResetResult, error) {
 	return agent.ResetResult{}, nil
 }
-func (s stubRuntime) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string) error {
+func (s stubRuntime) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string, *agent.MessageContext) error {
 	return nil
 }
 func (s stubRuntime) SendBatchPrompt(context.Context, string, string, []agent.PromptMessage) error {
@@ -64,7 +64,7 @@ func (r *recoverRuntime) RestartSession(context.Context) error { r.restartCalls+
 func (r *recoverRuntime) ResetConversation(context.Context, string) (agent.ResetResult, error) {
 	return agent.ResetResult{}, nil
 }
-func (r *recoverRuntime) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string) error {
+func (r *recoverRuntime) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string, *agent.MessageContext) error {
 	return nil
 }
 func (r *recoverRuntime) SendBatchPrompt(context.Context, string, string, []agent.PromptMessage) error {
@@ -95,7 +95,7 @@ func (r *deadRecoverRuntime) RestartSession(context.Context) error { r.restartCa
 func (r *deadRecoverRuntime) ResetConversation(context.Context, string) (agent.ResetResult, error) {
 	return agent.ResetResult{}, nil
 }
-func (r *deadRecoverRuntime) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string) error {
+func (r *deadRecoverRuntime) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string, *agent.MessageContext) error {
 	return nil
 }
 func (r *deadRecoverRuntime) SendBatchPrompt(context.Context, string, string, []agent.PromptMessage) error {
@@ -126,7 +126,7 @@ func (r *promptSpyRuntime) RestartSession(context.Context) error { return nil }
 func (r *promptSpyRuntime) ResetConversation(context.Context, string) (agent.ResetResult, error) {
 	return agent.ResetResult{}, nil
 }
-func (r *promptSpyRuntime) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string) error {
+func (r *promptSpyRuntime) SendUserPrompt(context.Context, string, string, string, *agent.MessageAttachments, string, string, *agent.MessageContext) error {
 	r.sendUserPromptCalls++
 	return nil
 }

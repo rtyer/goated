@@ -63,6 +63,7 @@ type Config struct {
 	TelegramAttachmentsRoot         string
 	TelegramAttachmentMaxBytes      int64
 	TelegramAttachmentMaxTotalBytes int64
+	TelegramAllowedChatIDs          []string
 	SlackBotToken                   string
 	SlackAppToken                   string
 	SlackChannelID                  string
@@ -77,6 +78,24 @@ type Config struct {
 	LogRetentionDays                int
 	LogRetentionMaxFiles            int
 	LogRetentionCompress            bool
+}
+
+// ParsedTelegramAllowedChatIDs parses TelegramAllowedChatIDs into int64 values.
+// Returns an error if any entry is not a valid int64.
+func (c Config) ParsedTelegramAllowedChatIDs() ([]int64, error) {
+	out := make([]int64, 0, len(c.TelegramAllowedChatIDs))
+	for _, s := range c.TelegramAllowedChatIDs {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid telegram.allowed_chat_ids entry %q: %w", s, err)
+		}
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 func LoadConfig() Config {
@@ -245,6 +264,7 @@ func LoadConfig() Config {
 		TelegramAttachmentsRoot:         telegramAttRoot,
 		TelegramAttachmentMaxBytes:      v.GetInt64("telegram.attachment_max_bytes"),
 		TelegramAttachmentMaxTotalBytes: v.GetInt64("telegram.attachment_max_total_bytes"),
+		TelegramAllowedChatIDs:          v.GetStringSlice("telegram.allowed_chat_ids"),
 		SlackBotToken:                   loadCred(credsDir, "GOAT_SLACK_BOT_TOKEN"),
 		SlackAppToken:                   loadCred(credsDir, "GOAT_SLACK_APP_TOKEN"),
 		SlackChannelID:                  slackChannelID,

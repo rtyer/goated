@@ -10,7 +10,7 @@ func TestBuildPromptEnvelope_Slack(t *testing.T) {
 		Paths:     []string{"workspace/tmp/slack/attachments/a.png"},
 		Failed:    []AttachmentInfo{{ReasonCode: "too_large"}},
 		Succeeded: []AttachmentInfo{{Path: "workspace/tmp/slack/attachments/a.png"}},
-	}, "1710000000.000100", "1709999000.000050")
+	}, "1710000000.000100", "1709999000.000050", nil)
 
 	if !strings.Contains(result, `"message"`) {
 		t.Error("missing message key")
@@ -57,14 +57,14 @@ func TestBuildPromptEnvelope_Slack(t *testing.T) {
 }
 
 func TestBuildPromptEnvelope_NoAttachments(t *testing.T) {
-	result := BuildPromptEnvelope("slack", "C1", "test", nil, "", "")
+	result := BuildPromptEnvelope("slack", "C1", "test", nil, "", "", nil)
 	if strings.Contains(result, "attachments") {
 		t.Error("nil attachments should not produce attachment keys")
 	}
 }
 
 func TestBuildPromptEnvelope_Telegram(t *testing.T) {
-	result := BuildPromptEnvelope("telegram", "999", "test msg", nil, "", "")
+	result := BuildPromptEnvelope("telegram", "999", "test msg", nil, "", "", nil)
 
 	if !strings.Contains(result, "TELEGRAM_MESSAGE_FORMATTING.md") {
 		t.Error("should use TELEGRAM formatting doc for telegram channel")
@@ -75,14 +75,14 @@ func TestBuildPromptEnvelope_Telegram(t *testing.T) {
 }
 
 func TestBuildPromptEnvelope_UnknownChannelDefaultsTelegram(t *testing.T) {
-	result := BuildPromptEnvelope("unknown", "111", "test", nil, "", "")
+	result := BuildPromptEnvelope("unknown", "111", "test", nil, "", "", nil)
 	if !strings.Contains(result, "TELEGRAM_MESSAGE_FORMATTING.md") {
 		t.Error("unknown channel should default to telegram formatting doc")
 	}
 }
 
 func TestBuildPromptEnvelope_TrimWhitespace(t *testing.T) {
-	result := BuildPromptEnvelope("slack", "C1", "  hello  ", nil, "", "")
+	result := BuildPromptEnvelope("slack", "C1", "  hello  ", nil, "", "", nil)
 	if !strings.Contains(result, "hello") {
 		t.Error("missing trimmed message")
 	}
@@ -91,8 +91,31 @@ func TestBuildPromptEnvelope_TrimWhitespace(t *testing.T) {
 	}
 }
 
+func TestBuildPromptEnvelope_WithSenderContext(t *testing.T) {
+	result := BuildPromptEnvelope("telegram", "-5148442475", "hi", nil, "", "", &MessageContext{
+		UserID:       "8160342309",
+		UserName:     "Alan Botts",
+		UserUsername: "alanbotts",
+		ChatType:     "supergroup",
+	})
+	for _, needle := range []string{`"user_id"`, `"8160342309"`, `"user_name"`, `"Alan Botts"`, `"user_username"`, `"alanbotts"`, `"chat_type"`, `"supergroup"`} {
+		if !strings.Contains(result, needle) {
+			t.Errorf("missing %s in envelope: %s", needle, result)
+		}
+	}
+}
+
+func TestBuildPromptEnvelope_NilContextOmitsFields(t *testing.T) {
+	result := BuildPromptEnvelope("telegram", "C1", "hi", nil, "", "", nil)
+	for _, needle := range []string{"user_id", "user_name", "user_username", "chat_type"} {
+		if strings.Contains(result, needle) {
+			t.Errorf("nil MessageContext should not emit %q in envelope: %s", needle, result)
+		}
+	}
+}
+
 func TestBuildPromptEnvelope_IsPydictFormat(t *testing.T) {
-	result := BuildPromptEnvelope("slack", "C1", "test", nil, "", "")
+	result := BuildPromptEnvelope("slack", "C1", "test", nil, "", "", nil)
 	trimmed := strings.TrimSpace(result)
 	if !strings.HasPrefix(trimmed, "{") || !strings.HasSuffix(trimmed, "}") {
 		t.Errorf("expected pydict format (dict literal), got: %s", trimmed)
